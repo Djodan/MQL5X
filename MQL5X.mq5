@@ -12,6 +12,7 @@
 #include "Inputs.mqh"           // Inputs moved to separate file
 #include "GlobalVariables.mqh"  // Globals moved to separate file
 #include "Trades.mqh"           // Trade tracking helpers
+#include "TestingMode.mqh"      // Testing mode helpers
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -25,11 +26,13 @@ int OnInit()
     // Set timer for periodic printing
     EventSetTimer(PrintInterval);
     
-    // Print initial trades
-    PrintAllTrades();
-    // Initial sync of trade lists
+    // Initial sync of trade lists then print counts
     SyncOpenTradesFromTerminal();
     CollectRecentClosedDeals(50);
+    PrintAllTrades();
+
+    if(TestingMode)
+        Testing_OnInit();
     
     return(INIT_SUCCEEDED);
 }
@@ -48,12 +51,14 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
 {
+    // Keep lists updated
+    SyncOpenTradesFromTerminal();
     if(PrintOnTick)
     {
         PrintAllTrades();
     }
-    // Keep lists updated
-    SyncOpenTradesFromTerminal();
+    if(TestingMode)
+        Testing_OnTick();
 }
 
 //+------------------------------------------------------------------+
@@ -61,129 +66,74 @@ void OnTick()
 //+------------------------------------------------------------------+
 void OnTimer()
 {
-    PrintAllTrades();
     // Periodic refresh of trade lists
     SyncOpenTradesFromTerminal();
     CollectRecentClosedDeals(50);
+    PrintAllTrades();
+    if(TestingMode)
+        Testing_OnTimer();
 }
 
 //+------------------------------------------------------------------+
-//| Function to print all open trades                               |
+//| Function to print counts of tracked trades                      |
 //+------------------------------------------------------------------+
 void PrintAllTrades()
 {
-    int totalPositions = PositionsTotal();
-    
     Print("===============================================");
-    Print("TRADE REPORT - ", TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS));
-    Print("Total Open Positions: ", totalPositions);
-    Print("===============================================");
-    
-    if(totalPositions == 0)
+    // Print("TRADE TRACKING - ", TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS));
+    // List tickets for currently open positions
+    int openCount = ArraySize(openTickets);
+    if(openCount > 0)
     {
-        Print("No open positions found.");
-        Print("===============================================");
-        return;
+        Print("Open position tickets:");
+        for(int i=0;i<openCount;i++)
+            Print(" - ", openTickets[i]);
     }
-    
-    // Loop through all open positions
-    for(int i = 0; i < totalPositions; i++)
-    {
-        if(PositionSelect(PositionGetSymbol(i)))
-        {
-            // Get position information
-            ulong ticket = PositionGetInteger(POSITION_TICKET);
-            string symbol = PositionGetString(POSITION_SYMBOL);
-            long type = PositionGetInteger(POSITION_TYPE);
-            double volume = PositionGetDouble(POSITION_VOLUME);
-            double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
-            double currentPrice = PositionGetDouble(POSITION_PRICE_CURRENT);
-            double profit = PositionGetDouble(POSITION_PROFIT);
-            double swap = PositionGetDouble(POSITION_SWAP);
-            double commission = PositionGetDouble(POSITION_COMMISSION);
-            datetime openTime = (datetime)PositionGetInteger(POSITION_TIME);
-            long magic = PositionGetInteger(POSITION_MAGIC);
-            string comment = PositionGetString(POSITION_COMMENT);
-            double sl = PositionGetDouble(POSITION_SL);
-            double tp = PositionGetDouble(POSITION_TP);
-            
-            // Convert position type to readable string
-            string typeStr = "";
-            switch(type)
-            {
-                case POSITION_TYPE_BUY:  typeStr = "BUY"; break;
-                case POSITION_TYPE_SELL: typeStr = "SELL"; break;
-                default: typeStr = "UNKNOWN";
-            }
-            
-            // Print position details
-            Print("--- Position ", i+1, " ---");
-            Print("Ticket: ", ticket);
-            Print("Symbol: ", symbol);
-            Print("Type: ", typeStr);
-            Print("Volume: ", DoubleToString(volume, 2));
-            Print("Open Price: ", DoubleToString(openPrice, _Digits));
-            Print("Current Price: ", DoubleToString(currentPrice, _Digits));
-            Print("Stop Loss: ", sl > 0 ? DoubleToString(sl, _Digits) : "None");
-            Print("Take Profit: ", tp > 0 ? DoubleToString(tp, _Digits) : "None");
-            Print("Profit: ", DoubleToString(profit, 2));
-            Print("Swap: ", DoubleToString(swap, 2));
-            Print("Commission: ", DoubleToString(commission, 2));
-            Print("Total P&L: ", DoubleToString(profit + swap + commission, 2));
-            Print("Open Time: ", TimeToString(openTime, TIME_DATE|TIME_SECONDS));
-            Print("Magic Number: ", magic);
-            Print("Comment: ", comment != "" ? comment : "None");
-            
-            // Calculate floating P&L in pips for forex symbols
-            if(StringLen(symbol) == 6) // Likely a forex pair
-            {
-                double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
-                double pipValue = point * 10; // For 5-digit brokers
-                if(_Digits == 3 || _Digits == 5) pipValue = point * 10;
-                else pipValue = point;
-                
-                double pips = 0;
-                if(type == POSITION_TYPE_BUY)
-                    pips = (currentPrice - openPrice) / pipValue;
-                else if(type == POSITION_TYPE_SELL)
-                    pips = (openPrice - currentPrice) / pipValue;
-                    
-                Print("Pips: ", DoubleToString(pips, 1));
-            }
-            
-            Print("");
-        }
-        else
-        {
-            Print("Failed to select position at index ", i, " Error: ", GetLastError());
-        }
-    }
-    
-    // Print account summary
-    PrintAccountSummary();
-    
+    Print("Trades currently open (tracked): ", ArraySize(openTickets));
+     Print("Trades closed offline (tracked): ", ArraySize(closedOfflineDeals));
+     Print("Trades closed online (tracked): ", ArraySize(closedOnlineDeals));
     Print("===============================================");
 }
 
 //+------------------------------------------------------------------+
-//| Function to print account summary                               |
+//| OnTradeTransaction: capture online-closed trades                |
 //+------------------------------------------------------------------+
-void PrintAccountSummary()
+void OnTradeTransaction(const MqlTradeTransaction& trans,const MqlTradeRequest& request,const MqlTradeResult& result)
 {
-    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
-    double equity = AccountInfoDouble(ACCOUNT_EQUITY);
-    double margin = AccountInfoDouble(ACCOUNT_MARGIN);
-    double freeMargin = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
-    double marginLevel = AccountInfoDouble(ACCOUNT_MARGIN_LEVEL);
-    double profit = AccountInfoDouble(ACCOUNT_PROFIT);
-    
-    Print("--- ACCOUNT SUMMARY ---");
-    Print("Balance: ", DoubleToString(balance, 2));
-    Print("Equity: ", DoubleToString(equity, 2));
-    Print("Floating P&L: ", DoubleToString(profit, 2));
-    Print("Margin Used: ", DoubleToString(margin, 2));
-    Print("Free Margin: ", DoubleToString(freeMargin, 2));
-    Print("Margin Level: ", marginLevel > 0 ? DoubleToString(marginLevel, 2) + "%" : "N/A");
+    if(trans.type==TRADE_TRANSACTION_DEAL_ADD)
+    {
+        ulong deal = trans.deal;
+        if(HistoryDealSelect(deal))
+        {
+            long entry = HistoryDealGetInteger(deal, DEAL_ENTRY);
+            if(entry==DEAL_ENTRY_OUT)
+            {
+                AddClosedOnline(
+                    deal,
+                    HistoryDealGetString(deal, DEAL_SYMBOL),
+                    HistoryDealGetInteger(deal, DEAL_TYPE),
+                    HistoryDealGetDouble(deal, DEAL_VOLUME),
+                    0.0, // openPrice unknown here
+                    HistoryDealGetDouble(deal, DEAL_PRICE),
+                    HistoryDealGetDouble(deal, DEAL_PROFIT),
+                    HistoryDealGetDouble(deal, DEAL_SWAP),
+                    HistoryDealGetDouble(deal, DEAL_COMMISSION),
+                    (datetime)HistoryDealGetInteger(deal, DEAL_TIME)
+                );
+            }
+            else if(entry==DEAL_ENTRY_IN)
+            {
+                // New position opened: trigger testing action if enabled
+                if(TestingMode)
+                {
+                    // Try to resolve the position ticket associated with this deal
+                    ulong pos_ticket = (ulong)HistoryDealGetInteger(deal, DEAL_POSITION_ID);
+                    if(pos_ticket!=0)
+                        Testing_HandleOpenedPosition(pos_ticket);
+                }
+            }
+        }
+    }
 }
 
 //+------------------------------------------------------------------+

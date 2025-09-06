@@ -18,4 +18,7 @@ input int Risk = 1;                // Risk
 input int PrintInterval = 5;       // Print interval in seconds
 input bool PrintOnTick = false;    // Print on every tick (can be noisy)
 
+// Testing mode toggle
+input bool TestingMode = false;    // Enable testing mode logic
+
 #endif // MQL5X_INPUTS_MQH

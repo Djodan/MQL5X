@@ -24,16 +24,28 @@ datetime openOpenTimes[];
 long     openMagics[];
 string   openComments[]; 
 
-// Global parallel arrays for tracking CLOSED trades
-ulong    closedDeals[];
-string   closedSymbols[];
-long     closedTypes[];
-double   closedVolumes[];
-double   closedOpenPrices[];
-double   closedClosePrices[];
-double   closedProfits[];
-double   closedSwaps[];
-double   closedCommissions[];
-datetime closedCloseTimes[];
+// Global parallel arrays for tracking CLOSED trades (OFFLINE: from history)
+ulong    closedOfflineDeals[];
+string   closedOfflineSymbols[];
+long     closedOfflineTypes[];
+double   closedOfflineVolumes[];
+double   closedOfflineOpenPrices[];
+double   closedOfflineClosePrices[];
+double   closedOfflineProfits[];
+double   closedOfflineSwaps[];
+double   closedOfflineCommissions[];
+datetime closedOfflineCloseTimes[];
+
+// Global parallel arrays for tracking CLOSED trades (ONLINE: while EA is alive)
+ulong    closedOnlineDeals[];
+string   closedOnlineSymbols[];
+long     closedOnlineTypes[];
+double   closedOnlineVolumes[];
+double   closedOnlineOpenPrices[];
+double   closedOnlineClosePrices[];
+double   closedOnlineProfits[];
+double   closedOnlineSwaps[];
+double   closedOnlineCommissions[];
+datetime closedOnlineCloseTimes[];
 
 #endif // MQL5X_GLOBALVARIABLES_MQH

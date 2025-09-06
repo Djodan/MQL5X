@@ -17,10 +17,18 @@ int FindOpenTradeIndexByTicket(ulong ticket)
 }
 
 // Utility: find index of closed trade by deal, -1 if not found
-int FindClosedTradeIndexByDeal(ulong deal)
+int FindClosedOfflineIndexByDeal(ulong deal)
 {
-   for(int i=0;i<ArraySize(closedDeals);++i)
-      if(closedDeals[i]==deal)
+   for(int i=0;i<ArraySize(closedOfflineDeals);++i)
+      if(closedOfflineDeals[i]==deal)
+         return i;
+   return -1;
+}
+
+int FindClosedOnlineIndexByDeal(ulong deal)
+{
+   for(int i=0;i<ArraySize(closedOnlineDeals);++i)
+      if(closedOnlineDeals[i]==deal)
          return i;
    return -1;
 }
@@ -118,7 +126,7 @@ bool RemoveOpenTrade(ulong ticket)
 }
 
 // Add or update a closed trade entry
-void UpsertClosedTrade(
+void UpsertClosedOffline(
    ulong deal,
    string symbol,
    long type,
@@ -130,76 +138,76 @@ void UpsertClosedTrade(
    double commission,
    datetime closeTime)
 {
-   int idx = FindClosedTradeIndexByDeal(deal);
+   int idx = FindClosedOfflineIndexByDeal(deal);
    if(idx<0)
    {
-      int n = ArraySize(closedDeals);
-      ArrayResize(closedDeals, n+1);
-      ArrayResize(closedSymbols, n+1);
-      ArrayResize(closedTypes, n+1);
-      ArrayResize(closedVolumes, n+1);
-      ArrayResize(closedOpenPrices, n+1);
-      ArrayResize(closedClosePrices, n+1);
-      ArrayResize(closedProfits, n+1);
-      ArrayResize(closedSwaps, n+1);
-      ArrayResize(closedCommissions, n+1);
-      ArrayResize(closedCloseTimes, n+1);
+      int n = ArraySize(closedOfflineDeals);
+      ArrayResize(closedOfflineDeals, n+1);
+      ArrayResize(closedOfflineSymbols, n+1);
+      ArrayResize(closedOfflineTypes, n+1);
+      ArrayResize(closedOfflineVolumes, n+1);
+      ArrayResize(closedOfflineOpenPrices, n+1);
+      ArrayResize(closedOfflineClosePrices, n+1);
+      ArrayResize(closedOfflineProfits, n+1);
+      ArrayResize(closedOfflineSwaps, n+1);
+      ArrayResize(closedOfflineCommissions, n+1);
+      ArrayResize(closedOfflineCloseTimes, n+1);
 
-      closedDeals[n]       = deal;
-      closedSymbols[n]     = symbol;
-      closedTypes[n]       = type;
-      closedVolumes[n]     = volume;
-      closedOpenPrices[n]  = openPrice;
-      closedClosePrices[n] = closePrice;
-      closedProfits[n]     = profit;
-      closedSwaps[n]       = swap;
-      closedCommissions[n] = commission;
-      closedCloseTimes[n]  = closeTime;
+      closedOfflineDeals[n]       = deal;
+      closedOfflineSymbols[n]     = symbol;
+      closedOfflineTypes[n]       = type;
+      closedOfflineVolumes[n]     = volume;
+      closedOfflineOpenPrices[n]  = openPrice;
+      closedOfflineClosePrices[n] = closePrice;
+      closedOfflineProfits[n]     = profit;
+      closedOfflineSwaps[n]       = swap;
+      closedOfflineCommissions[n] = commission;
+      closedOfflineCloseTimes[n]  = closeTime;
    }
    else
    {
-      closedDeals[idx]       = deal;
-      closedSymbols[idx]     = symbol;
-      closedTypes[idx]       = type;
-      closedVolumes[idx]     = volume;
-      closedOpenPrices[idx]  = openPrice;
-      closedClosePrices[idx] = closePrice;
-      closedProfits[idx]     = profit;
-      closedSwaps[idx]       = swap;
-      closedCommissions[idx] = commission;
-      closedCloseTimes[idx]  = closeTime;
+      closedOfflineDeals[idx]       = deal;
+      closedOfflineSymbols[idx]     = symbol;
+      closedOfflineTypes[idx]       = type;
+      closedOfflineVolumes[idx]     = volume;
+      closedOfflineOpenPrices[idx]  = openPrice;
+      closedOfflineClosePrices[idx] = closePrice;
+      closedOfflineProfits[idx]     = profit;
+      closedOfflineSwaps[idx]       = swap;
+      closedOfflineCommissions[idx] = commission;
+      closedOfflineCloseTimes[idx]  = closeTime;
    }
 }
 
 // Remove a closed trade by deal
-bool RemoveClosedTrade(ulong deal)
+bool RemoveClosedOffline(ulong deal)
 {
-   int idx = FindClosedTradeIndexByDeal(deal);
+   int idx = FindClosedOfflineIndexByDeal(deal);
    if(idx<0) return false;
-   int n = ArraySize(closedDeals);
+   int n = ArraySize(closedOfflineDeals);
    if(idx < n-1)
    {
-      ArrayCopy(closedDeals, closedDeals, idx, idx+1, n-idx-1);
-      ArrayCopy(closedSymbols, closedSymbols, idx, idx+1, n-idx-1);
-      ArrayCopy(closedTypes, closedTypes, idx, idx+1, n-idx-1);
-      ArrayCopy(closedVolumes, closedVolumes, idx, idx+1, n-idx-1);
-      ArrayCopy(closedOpenPrices, closedOpenPrices, idx, idx+1, n-idx-1);
-      ArrayCopy(closedClosePrices, closedClosePrices, idx, idx+1, n-idx-1);
-      ArrayCopy(closedProfits, closedProfits, idx, idx+1, n-idx-1);
-      ArrayCopy(closedSwaps, closedSwaps, idx, idx+1, n-idx-1);
-      ArrayCopy(closedCommissions, closedCommissions, idx, idx+1, n-idx-1);
-      ArrayCopy(closedCloseTimes, closedCloseTimes, idx, idx+1, n-idx-1);
+      ArrayCopy(closedOfflineDeals, closedOfflineDeals, idx, idx+1, n-idx-1);
+      ArrayCopy(closedOfflineSymbols, closedOfflineSymbols, idx, idx+1, n-idx-1);
+      ArrayCopy(closedOfflineTypes, closedOfflineTypes, idx, idx+1, n-idx-1);
+      ArrayCopy(closedOfflineVolumes, closedOfflineVolumes, idx, idx+1, n-idx-1);
+      ArrayCopy(closedOfflineOpenPrices, closedOfflineOpenPrices, idx, idx+1, n-idx-1);
+      ArrayCopy(closedOfflineClosePrices, closedOfflineClosePrices, idx, idx+1, n-idx-1);
+      ArrayCopy(closedOfflineProfits, closedOfflineProfits, idx, idx+1, n-idx-1);
+      ArrayCopy(closedOfflineSwaps, closedOfflineSwaps, idx, idx+1, n-idx-1);
+      ArrayCopy(closedOfflineCommissions, closedOfflineCommissions, idx, idx+1, n-idx-1);
+      ArrayCopy(closedOfflineCloseTimes, closedOfflineCloseTimes, idx, idx+1, n-idx-1);
    }
-   ArrayResize(closedDeals, n-1);
-   ArrayResize(closedSymbols, n-1);
-   ArrayResize(closedTypes, n-1);
-   ArrayResize(closedVolumes, n-1);
-   ArrayResize(closedOpenPrices, n-1);
-   ArrayResize(closedClosePrices, n-1);
-   ArrayResize(closedProfits, n-1);
-   ArrayResize(closedSwaps, n-1);
-   ArrayResize(closedCommissions, n-1);
-   ArrayResize(closedCloseTimes, n-1);
+   ArrayResize(closedOfflineDeals, n-1);
+   ArrayResize(closedOfflineSymbols, n-1);
+   ArrayResize(closedOfflineTypes, n-1);
+   ArrayResize(closedOfflineVolumes, n-1);
+   ArrayResize(closedOfflineOpenPrices, n-1);
+   ArrayResize(closedOfflineClosePrices, n-1);
+   ArrayResize(closedOfflineProfits, n-1);
+   ArrayResize(closedOfflineSwaps, n-1);
+   ArrayResize(closedOfflineCommissions, n-1);
+   ArrayResize(closedOfflineCloseTimes, n-1);
    return true;
 }
 
@@ -221,8 +229,9 @@ void SyncOpenTradesFromTerminal()
    int total = PositionsTotal();
    for(int i=0;i<total;++i)
    {
-      string symbol = PositionGetSymbol(i);
-      if(!PositionSelect(symbol))
+      ulong ticket = PositionGetTicket(i);
+      if(ticket==0) continue;
+      if(!PositionSelectByTicket(ticket))
          continue;
       UpsertOpenTrade(
          (ulong)PositionGetInteger(POSITION_TICKET),
@@ -262,7 +271,7 @@ void CollectRecentClosedDeals(int maxToScan=50)
       // Try to fetch corresponding open price from history if available (not always)
       double openPrice = 0.0;
 
-      UpsertClosedTrade(
+      UpsertClosedOffline(
          deal,
          HistoryDealGetString(deal, DEAL_SYMBOL),
          HistoryDealGetInteger(deal, DEAL_TYPE),
@@ -277,4 +286,128 @@ void CollectRecentClosedDeals(int maxToScan=50)
    }
 }
 
+// Add an online closed trade (from OnTradeTransaction)
+void AddClosedOnline(
+   ulong deal,
+   string symbol,
+   long type,
+   double volume,
+   double openPrice,
+   double closePrice,
+   double profit,
+   double swap,
+   double commission,
+   datetime closeTime)
+{
+   int idx = FindClosedOnlineIndexByDeal(deal);
+   if(idx<0)
+   {
+      int n = ArraySize(closedOnlineDeals);
+      ArrayResize(closedOnlineDeals, n+1);
+      ArrayResize(closedOnlineSymbols, n+1);
+      ArrayResize(closedOnlineTypes, n+1);
+      ArrayResize(closedOnlineVolumes, n+1);
+      ArrayResize(closedOnlineOpenPrices, n+1);
+      ArrayResize(closedOnlineClosePrices, n+1);
+      ArrayResize(closedOnlineProfits, n+1);
+      ArrayResize(closedOnlineSwaps, n+1);
+      ArrayResize(closedOnlineCommissions, n+1);
+      ArrayResize(closedOnlineCloseTimes, n+1);
+
+      closedOnlineDeals[n]       = deal;
+      closedOnlineSymbols[n]     = symbol;
+      closedOnlineTypes[n]       = type;
+      closedOnlineVolumes[n]     = volume;
+      closedOnlineOpenPrices[n]  = openPrice;
+      closedOnlineClosePrices[n] = closePrice;
+      closedOnlineProfits[n]     = profit;
+      closedOnlineSwaps[n]       = swap;
+      closedOnlineCommissions[n] = commission;
+      closedOnlineCloseTimes[n]  = closeTime;
+   }
+   else
+   {
+      closedOnlineDeals[idx]       = deal;
+      closedOnlineSymbols[idx]     = symbol;
+      closedOnlineTypes[idx]       = type;
+      closedOnlineVolumes[idx]     = volume;
+      closedOnlineOpenPrices[idx]  = openPrice;
+      closedOnlineClosePrices[idx] = closePrice;
+      closedOnlineProfits[idx]     = profit;
+      closedOnlineSwaps[idx]       = swap;
+      closedOnlineCommissions[idx] = commission;
+      closedOnlineCloseTimes[idx]  = closeTime;
+   }
+}
+
 #endif // MQL5X_TRADES_MQH
+
+//+------------------------------------------------------------------+
+//| Utilities: operate by exact position ticket                     |
+//+------------------------------------------------------------------+
+
+// Find and select a position by ticket (fallback via scan)
+bool SelectPositionByTicket(ulong ticket, string &symbol, long &type, double &volume)
+{
+   if(!PositionSelectByTicket(ticket))
+      return false;
+   symbol = PositionGetString(POSITION_SYMBOL);
+   type   = PositionGetInteger(POSITION_TYPE);
+   volume = PositionGetDouble(POSITION_VOLUME);
+   return true;
+}
+
+// Close a specific position by ticket (optionally partial volume)
+bool ClosePositionByTicket(ulong ticket, double volume=0.0, uint deviation=20)
+{
+   string symbol=""; long ptype=0; double pvol=0.0;
+   if(!SelectPositionByTicket(ticket, symbol, ptype, pvol))
+      return false;
+
+   if(volume<=0.0 || volume>pvol)
+      volume = pvol;
+
+   MqlTradeRequest req; MqlTradeResult res; ZeroMemory(req); ZeroMemory(res);
+   req.action   = TRADE_ACTION_DEAL;
+   req.symbol   = symbol;
+   req.position = ticket;
+   req.volume   = volume;
+   req.deviation= (int)deviation;
+   req.type_filling = ORDER_FILLING_FOK;
+
+   double ask = SymbolInfoDouble(symbol, SYMBOL_ASK);
+   double bid = SymbolInfoDouble(symbol, SYMBOL_BID);
+   if(ptype==POSITION_TYPE_BUY)
+   {
+      req.type  = ORDER_TYPE_SELL;   // close buy by selling
+      req.price = bid;
+   }
+   else
+   {
+      req.type  = ORDER_TYPE_BUY;    // close sell by buying
+      req.price = ask;
+   }
+
+   if(!OrderSend(req,res))
+      return false;
+   return (res.retcode==TRADE_RETCODE_DONE || res.retcode==TRADE_RETCODE_PLACED);
+}
+
+// Modify SL/TP for a specific position by ticket
+bool ModifyPositionByTicket(ulong ticket, double sl, double tp)
+{
+   string symbol=""; long ptype=0; double pvol=0.0;
+   if(!SelectPositionByTicket(ticket, symbol, ptype, pvol))
+      return false;
+
+   MqlTradeRequest req; MqlTradeResult res; ZeroMemory(req); ZeroMemory(res);
+   req.action   = TRADE_ACTION_SLTP;
+   req.symbol   = symbol;
+   req.position = ticket;
+   req.sl       = sl;
+   req.tp       = tp;
+   if(!OrderSend(req,res))
+      return false;
+   return (res.retcode==TRADE_RETCODE_DONE);
+}
+
