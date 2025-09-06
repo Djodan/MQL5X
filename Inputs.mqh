@@ -20,5 +20,9 @@ input bool PrintOnTick = false;    // Print on every tick (can be noisy)
 
 // Testing mode toggle
 input bool TestingMode = false;    // Enable testing mode logic
+// Server sending
+input bool   SendToServer = true;   // Enable HTTP POST sending (default true)
+input string ServerIP     = "127.0.0.1"; // Server IP or hostname
+input int    ServerPort   = 5000;        // Server port
 
 #endif // MQL5X_INPUTS_MQH

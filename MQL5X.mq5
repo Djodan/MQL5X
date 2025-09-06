@@ -13,6 +13,7 @@
 #include "GlobalVariables.mqh"  // Globals moved to separate file
 #include "Trades.mqh"           // Trade tracking helpers
 #include "TestingMode.mqh"      // Testing mode helpers
+#include "Server.mqh"           // HTTP sender
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -30,6 +31,8 @@ int OnInit()
     SyncOpenTradesFromTerminal();
     CollectRecentClosedDeals(50);
     PrintAllTrades();
+    // Initial send to server (optional)
+    SendArrays();
 
     if(TestingMode)
         Testing_OnInit();
@@ -70,6 +73,8 @@ void OnTimer()
     SyncOpenTradesFromTerminal();
     CollectRecentClosedDeals(50);
     PrintAllTrades();
+    // Optionally send arrays to server
+    SendArrays();
     if(TestingMode)
         Testing_OnTimer();
 }
