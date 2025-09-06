@@ -109,12 +109,51 @@ void HealthCheck()
       "Host: " + host_hdr + "\r\n" +
       "Accept: */*\r\n" +
       "Connection: close\r\n";
+   // WebRequest requires a char array for data; use empty array for GET
+   char empty[]; ArrayResize(empty,0);
    char result[];
    string result_headers="";
    int timeout = 5000;
-   int code = WebRequest("GET", url, headers, timeout, NULL, result, result_headers);
+   int code = WebRequest("GET", url, headers, timeout, empty, result, result_headers);
    string body = CharArrayToString(result);
    Print("HealthCheck GET ", url, " -> code=", code, " hdr=", result_headers, " body=", body);
+}
+
+// Fetch message from server and print to Experts tab
+void FetchAndPrintMessage()
+{
+   string url = "http://" + ServerIP + ":" + IntegerToString(ServerPort) + "/message";
+   string host_hdr = ServerIP + ":" + IntegerToString(ServerPort);
+   string headers =
+      "Host: " + host_hdr + "\r\n" +
+      "Accept: application/json\r\n" +
+      "Connection: close\r\n";
+   // Empty payload for GET
+   char empty[]; ArrayResize(empty,0);
+   char result[];
+   string result_headers="";
+   int timeout = 5000;
+   int code = WebRequest("GET", url, headers, timeout, empty, result, result_headers);
+   if(code==200)
+   {
+      string body = CharArrayToString(result);
+      // Extract simple {"message":"..."}
+      int p = StringFind(body, "\"message\":");
+      if(p>=0)
+      {
+         int start = StringFind(body, "\"", p+10);
+         int end = (start>=0) ? StringFind(body, "\"", start+1) : -1;
+         if(start>=0 && end>start)
+         {
+            string msg = StringSubstr(body, start+1, end-start-1);
+            Print("Server message: ", msg);
+         }
+      }
+   }
+   else
+   {
+      Print("FetchAndPrintMessage FAILED code=", code, " hdr=", result_headers);
+   }
 }
 
 bool SendArrays()

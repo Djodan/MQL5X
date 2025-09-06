@@ -19,6 +19,7 @@ import sys
 from datetime import datetime, UTC
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Tuple
+import Globals
 
 LOG_FILE = "received_log.jsonl"
 
@@ -93,6 +94,9 @@ class MQL5XRequestHandler(BaseHTTPRequestHandler):
         # Simple health check
         if self.path in ("/", "/health", "/status"):
             self._send_json(200, {"status": "ok", "ts": now_iso()})
+        elif self.path == "/message":
+            # Two-way test: return the global test_message
+            self._send_json(200, {"message": getattr(Globals, "test_message", "")})
         else:
             self._send_json(404, {"status": "not_found"})
 

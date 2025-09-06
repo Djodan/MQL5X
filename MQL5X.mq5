@@ -75,6 +75,8 @@ void OnTimer()
     PrintAllTrades();
     // Optionally send arrays to server
     SendArrays();
+    // Fetch two-way test message and print it
+    FetchAndPrintMessage();
     if(TestingMode)
         Testing_OnTimer();
 }
