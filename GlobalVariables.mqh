@@ -22,7 +22,7 @@ double   openSLs[];
 double   openTPs[];
 datetime openOpenTimes[];
 long     openMagics[];
-string   openComments[];
+string   openComments[]; 
 
 // Global parallel arrays for tracking CLOSED trades
 ulong    closedDeals[];
