@@ -89,9 +89,18 @@ class MQL5XRequestHandler(BaseHTTPRequestHandler):
                             1,
                             {"symbol": "XAUUSD", "volume": 1.00, "comment": "auto BUY on reply #20", "slPips": 10000, "tpPips": 10000}
                         )
+                        # Mirror on TopStepX
+                        try:
+                            Functions.topstepx_mirror_mt5_sequence_step(20)
+                        except Exception:
+                            pass
                         injected = True
                     elif r == 40:
                         enqueue_command(client_id, 2, {"symbol": "XAUUSD", "volume": 1.00, "comment": "auto SELL on reply #40"})
+                        try:
+                            Functions.topstepx_mirror_mt5_sequence_step(40)
+                        except Exception:
+                            pass
                         injected = True
                     elif r == 60:
                         # Second BUY with absolute SL/TP prices
@@ -100,10 +109,18 @@ class MQL5XRequestHandler(BaseHTTPRequestHandler):
                             1,
                             {"symbol": "XAUUSD", "volume": 1.00, "comment": "auto BUY on reply #60", "sl": 3341, "tp": 3722}
                         )
+                        try:
+                            Functions.topstepx_mirror_mt5_sequence_step(60)
+                        except Exception:
+                            pass
                         injected = True
                     elif r == 80:
                         # Close the SELL (type=1)
                         enqueue_command(client_id, 3, {"symbol": "XAUUSD", "type": 1, "comment": "auto CLOSE SELL on reply #80"})
+                        try:
+                            Functions.topstepx_mirror_mt5_sequence_step(80)
+                        except Exception:
+                            pass
                         injected = True
                     if injected and int(msg.get("state", 0)) == 0:
                         msg = get_next_command(client_id)
@@ -122,6 +139,8 @@ class MQL5XRequestHandler(BaseHTTPRequestHandler):
                     # Refresh TopStepX discovered accounts periodically so they appear in the list
                     try:
                         Functions.find_all_topstepx_accounts(only_active_accounts=False, refresh_seconds=60)
+                        # Ensure background threads are running for discovered accounts
+                        Functions.start_topstepx_threads_for_discovered(interval_seconds=10)
                     except Exception:
                         pass
                     # Include the currently polling client even if it hasn't posted a snapshot yet
@@ -133,12 +152,7 @@ class MQL5XRequestHandler(BaseHTTPRequestHandler):
                         # Open count
                         try:
                             if prefix.startswith("TopStepX"):
-                                # Try to refresh open positions for this account id (cached within refresh window)
-                                try:
-                                    Functions.refresh_topstepx_open_positions([cid], refresh_seconds=10)
-                                except Exception:
-                                    pass
-                                oc = len(Functions.get_topstepx_open(cid))
+                                oc = Functions.get_topstepx_open_count(cid, refresh=False)
                             else:
                                 oc = len(get_client_open(cid))
                         except Exception:
@@ -153,7 +167,10 @@ class MQL5XRequestHandler(BaseHTTPRequestHandler):
                             state_str = "Online"
                         else:
                             state_str = "Online" if (str(cid) in allowed_tsx) else "Offline"
-                        sys.stdout.write(f"{prefix} State {state_str} ID={cid} Open={oc} LastAction={la} Replies={stats['replies']}\n")
+                        # Colorize State text: green for Online, red for Offline
+                        color = "\x1b[32m" if state_str == "Online" else "\x1b[31m"
+                        reset = "\x1b[0m"
+                        sys.stdout.write(f"{prefix} {color}State {state_str}{reset} ID={cid} Open={oc} LastAction={la} Replies={stats['replies']}\n")
                 except Exception:
                     pass
                 # Optional: print each open trade's entry, TP, and SL (diagnostic)

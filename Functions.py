@@ -12,6 +12,8 @@ from datetime import datetime, UTC
 from typing import Any, Dict, List, Tuple, Optional, Set
 import uuid
 import time as _time
+import threading as _threading
+import importlib
 
 LOG_FILE = "received_log.jsonl"
 
@@ -34,6 +36,10 @@ _TOPSTEPX_OPEN: Dict[str, List[dict]] = {}
 _TOPSTEPX_CLOSED: Dict[str, List[dict]] = {}
 _TOPSTEPX_LAST_POS_IDS: Dict[str, Set[str]] = {}
 _TOPSTEPX_LAST_POLL_TIME: Dict[str, float] = {}
+
+# TopStepX per-account background threads
+_TOPSTEPX_THREADS: Dict[str, _threading.Thread] = {}
+_TOPSTEPX_THREAD_STOPS: Dict[str, _threading.Event] = {}
 
 
 def now_iso() -> str:
@@ -313,6 +319,8 @@ def find_all_topstepx_accounts(only_active_accounts: bool = False, refresh_secon
                     _DISCOVERED_TOPSTEPX_ACCOUNTS.add(aid)
                     # Mark mode to help status prefix classify as TopStepX
                     _CLIENT_MODE.setdefault(aid, "TopStepX")
+                    # Ensure thread structures exist
+                    _TOPSTEPX_THREAD_STOPS.setdefault(aid, _threading.Event())
 
         return data
     except Exception:
@@ -401,6 +409,249 @@ def get_topstepx_open(account_id: str) -> List[dict]:
 def get_topstepx_closed(account_id: str) -> List[dict]:
     with _LOCK:
         return deepcopy(_TOPSTEPX_CLOSED.get(str(account_id), []))
+
+
+def get_topstepx_open_count(account_id: str, refresh: bool = False, refresh_seconds: int = 10, timeout: int = 10) -> int:
+    """
+    Return the number of open positions for the given TopStepX account. Optionally refresh via API.
+    """
+    try:
+        if refresh:
+            refresh_topstepx_open_positions([str(account_id)], refresh_seconds=refresh_seconds, timeout=timeout)
+        return len(get_topstepx_open(str(account_id)))
+    except Exception:
+        return 0
+
+
+def get_all_topstepx_open_counts(refresh: bool = False, refresh_seconds: int = 10, timeout: int = 10) -> Dict[str, int]:
+    """
+    Return a mapping of accountId -> open positions count for all discovered TopStepX accounts.
+    """
+    try:
+        ids = get_discovered_topstepx_accounts()
+        if refresh and ids:
+            refresh_topstepx_open_positions(ids, refresh_seconds=refresh_seconds, timeout=timeout)
+        return {aid: len(get_topstepx_open(aid)) for aid in ids}
+    except Exception:
+        return {}
+
+
+# ---------------------- TopStepX background threads ----------------------
+
+def _poll_topstepx_account_loop(aid: str, interval_seconds: int = 10, timeout: int = 10) -> None:
+    stop = _TOPSTEPX_THREAD_STOPS.setdefault(aid, _threading.Event())
+    while True:
+        if stop.is_set():
+            break
+        try:
+            # Force refresh by bypassing throttle for this account
+            refresh_topstepx_open_positions([aid], refresh_seconds=0, timeout=timeout)
+        except Exception:
+            pass
+        # Sleep in small chunks so we can react to stop
+        slept = 0
+        while slept < max(1, int(interval_seconds)):
+            if stop.is_set():
+                break
+            _time.sleep(0.5)
+            slept += 0.5
+
+
+def start_topstepx_account_thread(aid: str, interval_seconds: int = 10, timeout: int = 10) -> None:
+    aid = str(aid)
+    with _LOCK:
+        # Create or restart if thread is missing or not alive
+        th = _TOPSTEPX_THREADS.get(aid)
+        if th is not None and th.is_alive():
+            return
+        # Reset/ensure stop event exists and cleared
+        stop = _TOPSTEPX_THREAD_STOPS.setdefault(aid, _threading.Event())
+        try:
+            stop.clear()
+        except Exception:
+            _TOPSTEPX_THREAD_STOPS[aid] = _threading.Event()
+        # Spawn thread
+        t = _threading.Thread(target=_poll_topstepx_account_loop, args=(aid, interval_seconds, timeout), daemon=True)
+        _TOPSTEPX_THREADS[aid] = t
+        t.start()
+
+
+def start_topstepx_threads_for_discovered(interval_seconds: int = 10, timeout: int = 10) -> None:
+    ids = get_discovered_topstepx_accounts()
+    for aid in ids:
+        start_topstepx_account_thread(aid, interval_seconds=interval_seconds, timeout=timeout)
+
+
+# ---------------------- TopStepX order placement ----------------------
+
+def topstepx_place_order(account_id: int | str,
+                         contract_id: str,
+                         side: int,
+                         size: int,
+                         order_type: int = 2,
+                         bracket1: Optional[Dict[str, Any]] = None,
+                         bracket2: Optional[Dict[str, Any]] = None,
+                         timeout: int = 15) -> Dict[str, Any]:
+    """
+    Place an order via TopStepX Order/place.
+    Mirrors TopStepX_Files/Open_Trade.py behavior with token refresh retry.
+
+    Params:
+      - account_id: numeric account id
+      - contract_id: e.g. "CON.F.US.GCE.Z25"
+      - side: 0 Buy, 1 Sell
+      - size: integer contract size
+      - order_type: 2 for market (per example)
+      - bracket1: optional dict, e.g. {"action": "Sell", "orderType": "Limit", "price": 123.45}
+      - bracket2: optional dict, e.g. {"action": "Sell", "orderType": "Stop", "stopPrice": 120.00}
+
+    Returns parsed JSON or dict with status/text on errors.
+    """
+    ORDER_URL = "https://api.topstepx.com/api/Order/place"
+    try:
+        import requests
+        # Import TopStepX_Files.Connector dynamically to reuse authenticate
+        # Ensure the TopStepX_Files dir is importable
+        import os as _os, sys as _sys
+        tsx_dir = _os.path.join(_os.path.dirname(__file__), "TopStepX_Files")
+        if tsx_dir not in _sys.path:
+            _sys.path.insert(0, tsx_dir)
+        Connector = importlib.import_module("Connector")
+        TGlobals = importlib.import_module("Globals")
+
+        def _get_headers() -> Dict[str, str]:
+            token = Connector.authenticate(getattr(TGlobals, "username", ""), getattr(TGlobals, "KEY_API_KEY_2", ""))
+            return {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            }
+
+        payload: Dict[str, Any] = {
+            "accountId": int(account_id) if str(account_id).isdigit() else account_id,
+            "contractId": contract_id,
+            "type": int(order_type),
+            "side": int(side),
+            "size": int(size),
+        }
+        if bracket1:
+            payload["bracket1"] = bracket1
+        if bracket2:
+            payload["bracket2"] = bracket2
+
+        headers = _get_headers()
+        resp = requests.post(ORDER_URL, json=payload, headers=headers, timeout=timeout)
+        if resp.status_code == 401:
+            headers = _get_headers()
+            resp = requests.post(ORDER_URL, json=payload, headers=headers, timeout=timeout)
+
+        try:
+            return resp.json()
+        except Exception:
+            return {"success": False, "status": resp.status_code, "text": getattr(resp, "text", "")}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+def topstepx_close_contract(account_id: int | str,
+                            contract_id: str,
+                            timeout: int = 15) -> Dict[str, Any]:
+    """
+    Close a TopStepX contract position via Position/closeContract.
+    Mirrors TopStepX_Files/Close_Trade.py but uses Connector.authenticate and retries on 401.
+    """
+    URL = "https://api.topstepx.com/api/Position/closeContract"
+    try:
+        import requests
+        import os as _os, sys as _sys
+        tsx_dir = _os.path.join(_os.path.dirname(__file__), "TopStepX_Files")
+        if tsx_dir not in _sys.path:
+            _sys.path.insert(0, tsx_dir)
+        Connector = importlib.import_module("Connector")
+        TGlobals = importlib.import_module("Globals")
+
+        def _get_headers() -> Dict[str, str]:
+            token = Connector.authenticate(getattr(TGlobals, "username", ""), getattr(TGlobals, "KEY_API_KEY_2", ""))
+            return {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            }
+
+        payload = {
+            "accountId": int(account_id) if str(account_id).isdigit() else account_id,
+            "contractId": contract_id,
+        }
+
+        headers = _get_headers()
+        resp = requests.post(URL, json=payload, headers=headers, timeout=timeout)
+        if resp.status_code == 401:
+            headers = _get_headers()
+            resp = requests.post(URL, json=payload, headers=headers, timeout=timeout)
+        try:
+            return resp.json()
+        except Exception:
+            return {"success": False, "status": resp.status_code, "text": getattr(resp, "text", "")}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+# ---------------------- MT5 sequence mirroring for TopStepX ----------------------
+
+_DEFAULT_TSX_CONTRACT_ID = "CON.F.US.GCE.Z25"
+
+
+def _get_allowed_topstepx_accounts() -> List[str]:
+    try:
+        import Globals
+        allowed = getattr(Globals, "TOPSTEPX_ALLOWED_ACCOUNTS", []) or getattr(Globals, "TOPSTEP_ALLOWED_ACCOUNTS", [])
+        return [str(a) for a in allowed]
+    except Exception:
+        return []
+
+
+def topstepx_mirror_mt5_sequence_step(step_reply: int, contract_id: Optional[str] = None, size: int = 1) -> None:
+    """
+    Mirror MT5 sequence on TopStepX at specific reply counts.
+    20: BUY, 40: SELL, 60: BUY, 80: CLOSE contract.
+    """
+    cid = contract_id or _DEFAULT_TSX_CONTRACT_ID
+    acts: List[Tuple[str, Dict[str, Any]]] = []
+    if step_reply == 20:
+        acts.append(("BUY", {"side": 0}))
+    elif step_reply == 40:
+        acts.append(("SELL", {"side": 1}))
+    elif step_reply == 60:
+        acts.append(("BUY", {"side": 0}))
+    elif step_reply == 80:
+        acts.append(("CLOSE", {}))
+    else:
+        return
+
+    accts = _get_allowed_topstepx_accounts()
+    for aid in accts:
+        try:
+            if not acts:
+                continue
+            for name, params in acts:
+                if name == "CLOSE":
+                    res = topstepx_close_contract(aid, cid)
+                    # Minimal log line
+                    try:
+                        sys = __import__("sys").stdout
+                        sys.write(f"[{now_iso()}] TSX CLOSE account={aid} contract={cid} ok={res.get('success', True)}\n")
+                    except Exception:
+                        pass
+                else:
+                    side = int(params.get("side", 0))
+                    res = topstepx_place_order(aid, cid, side=side, size=int(size))
+                    try:
+                        sys = __import__("sys").stdout
+                        sys.write(f"[{now_iso()}] TSX ORDER {name} account={aid} contract={cid} size={size} ok={res.get('success', True)}\n")
+                    except Exception:
+                        pass
+        except Exception:
+            continue
 
 
 def print_find_all_accounts(only_active_accounts: bool = False, timeout: int = 10) -> dict:

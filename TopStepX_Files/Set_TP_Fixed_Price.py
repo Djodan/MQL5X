@@ -22,7 +22,7 @@ position = positions[0]
 size = position["size"]
 
 # 2. Fixed TP price
-tp_price = 3625.0
+tp_price = 3800.0
 
 # 3. Place TP Limit order
 tp_payload = {
