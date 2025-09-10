@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Simple HTTP server to receive JSON payloads from the MQL5X EA.
 - Expects POST requests with Content-Type: application/json
@@ -14,75 +13,32 @@ In MetaTrader 5, add this URL to:
 """
 
 import argparse
+import os
 import json
 import sys
-from datetime import datetime, UTC
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Tuple
 import Globals
-
-LOG_FILE = "received_log.jsonl"
-
-
-def now_iso() -> str:
-    return datetime.now(UTC).isoformat(timespec="seconds")
-
-
-def _type_name(v) -> str:
-    # Common MT5 conventions: 0=BUY, 1=SELL (others possible)
-    try:
-        return {0: "BUY", 1: "SELL"}.get(int(v), str(v))
-    except Exception:
-        return str(v)
-
-
-def _ts(ts: int | float | None) -> str:
-    if ts in (None, "", 0):
-        return "-"
-    try:
-        return datetime.fromtimestamp(int(ts), UTC).isoformat(timespec="seconds")
-    except Exception:
-        return str(ts)
-
-
-def _fmt(v, digits: int | None = None) -> str:
-    try:
-        if isinstance(v, (int, float)) and digits is not None:
-            return f"{v:.{digits}f}"
-        return str(v)
-    except Exception:
-        return str(v)
-
-
-def pretty_print_payload(data: dict) -> None:
-    id_ = data.get("id")
-    mode = data.get("mode")
-    open_list = data.get("open", [])
-
-    print("\n=== MQL5X Open Positions ===")
-    print(f"id: {id_}  mode: {mode}")
-    print(f"open positions: {len(open_list)}")
-    for i, p in enumerate(open_list, 1):
-        sym = p.get("symbol")
-        typ = _type_name(p.get("type"))
-        vol = _fmt(p.get("volume"), 2)
-        opn = _fmt(p.get("openPrice"))
-        cur = _fmt(p.get("price"))
-        sl = _fmt(p.get("sl"))
-        tp = _fmt(p.get("tp"))
-        tic = p.get("ticket")
-        mgc = p.get("magic")
-        cmt = p.get("comment", "")
-        print(f"  - #{i} {sym} {typ} vol={vol} open={opn} price={cur} sl={sl} tp={tp} ticket={tic} magic={mgc} comment={cmt}")
-    print("=== end open positions ===\n")
-
+import Functions
+from Functions import (
+    now_iso,
+    ingest_payload,
+    get_next_command,
+    record_command_delivery,
+    get_client_open,
+    get_client_closed_online,
+    list_clients,
+    enqueue_command,
+    ack_command,
+)
+import subprocess
 
 class MQL5XRequestHandler(BaseHTTPRequestHandler):
     server_version = "MQL5XHTTP/1.0"
 
     def log_message(self, format: str, *args) -> None:
-        # Compact log lines
-        sys.stdout.write("[%s] %s\n" % (now_iso(), format % args))
+        # Silence default HTTP logs to avoid noisy JSON prints.
+        return
 
     def _send_json(self, code: int, payload: dict) -> None:
         self.send_response(code)
@@ -94,11 +50,62 @@ class MQL5XRequestHandler(BaseHTTPRequestHandler):
         # Simple health check
         if self.path in ("/", "/health", "/status"):
             self._send_json(200, {"status": "ok", "ts": now_iso()})
-        elif self.path == "/message":
-            # Two-way test: return the global test_message
+            return
+
+        # Back-compat message
+        if self.path == "/message":
             self._send_json(200, {"message": getattr(Globals, "test_message", "")})
-        else:
-            self._send_json(404, {"status": "not_found"})
+            return
+
+        # EA polls next command: /command/<id>
+        if self.path.startswith("/command/"):
+            parts = [p for p in self.path.split("/") if p]
+            if len(parts) == 2:
+                client_id = parts[1]
+                msg = get_next_command(client_id)
+                # Record delivery stats
+                int_state = 0
+                if "state" in msg:
+                    try:
+                        int_state = int(msg.get("state", 0))
+                    except Exception:
+                        int_state = 0
+                stats = record_command_delivery(client_id, int_state)
+                # Print concise line: ID, open count, last action, replies
+                try:
+                    open_count = len(get_client_open(client_id))
+                except Exception:
+                    open_count = 0
+                sys.stdout.write(f"[{now_iso()}] ID={client_id} Open={open_count} LastAction={stats['last_action']} Replies={stats['replies']}\n")
+                self._send_json(200, msg)
+            else:
+                self._send_json(400, {"error": "bad_path"})
+            return
+
+        # Client views
+        if self.path.startswith("/clients"):
+            parts = [p for p in self.path.split("/") if p]
+            if len(parts) == 1:  # /clients
+                self._send_json(200, {"clients": list_clients()})
+                return
+            if len(parts) >= 2:
+                client_id = parts[1]
+                if len(parts) == 3 and parts[2] == "open":
+                    self._send_json(200, {"id": client_id, "open": get_client_open(client_id)})
+                    return
+                if len(parts) == 3 and parts[2] == "closed_online":
+                    self._send_json(200, {"id": client_id, "closed_online": get_client_closed_online(client_id)})
+                    return
+                # default: client summary
+                self._send_json(200, {
+                    "id": client_id,
+                    "open_count": len(get_client_open(client_id)),
+                    "closed_online_count": len(get_client_closed_online(client_id)),
+                })
+                return
+
+        # Not found
+        self._send_json(404, {"status": "not_found"})
 
     def do_POST(self) -> None:  # noqa: N802
         length = int(self.headers.get("Content-Length", 0))
@@ -111,38 +118,48 @@ class MQL5XRequestHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"status": "error", "error": "invalid_json"})
             return
 
-        # Extract summary
-        id_ = data.get("id")
-        mode = data.get("mode")
-        open_list = data.get("open", [])
-        closed_offline = data.get("closed_offline", [])
-        closed_online = data.get("closed_online", [])
+        # Routes: payload ingest or command enqueue/ack
+        path = self.path
+        if path == "/":
+            # Process and store per-client snapshots
+            summary, identity = ingest_payload(data)
+            self.log_message(
+                "Received payload: id=%s mode=%s open=%d",
+                identity.get("id"), identity.get("mode"), summary.get("open", 0)
+            )
+            self._send_json(200, {"status": "ok", "received": summary, **identity})
+            return
 
-        # Only summarize opens in server logs
-        self.log_message(
-            "Received payload: id=%s mode=%s open=%d",
-            id_, mode, len(open_list),
-        )
+        if path.startswith("/command/"):
+            # Enqueue a command to a client: POST /command/<id>
+            parts = [p for p in path.split("/") if p]
+            if len(parts) == 2:
+                client_id = parts[1]
+                # Expect { state: 0|1|2|3, payload?: {...} }
+                state = int(data.get("state", 0))
+                payload = data.get("payload") or {}
+                cmd = enqueue_command(client_id, state, payload)
+                self._send_json(200, {"status": "queued", "command": cmd})
+                return
+            self._send_json(400, {"error": "bad_path"})
+            return
 
-        # Pretty print the contents for quick inspection
-        pretty_print_payload(data)
+        if path.startswith("/ack/"):
+            # EA acknowledges a command: POST /ack/<id>
+            parts = [p for p in path.split("/") if p]
+            if len(parts) == 2:
+                client_id = parts[1]
+                cmd_id = data.get("cmdId")
+                success = bool(data.get("success", False))
+                details = data.get("details") or {}
+                res = ack_command(client_id, cmd_id, success, details)
+                self._send_json(200, res)
+                return
+            self._send_json(400, {"error": "bad_path"})
+            return
 
-        # Append full payload with timestamp to a log file for later inspection
-        try:
-            with open(LOG_FILE, "a", encoding="utf-8") as f:
-                f.write(json.dumps({"ts": now_iso(), **data}) + "\n")
-        except Exception as exc:
-            self.log_message("Failed to write log: %s", exc)
-
-        # Respond OK with a tiny echo summary
-        self._send_json(200, {
-            "status": "ok",
-            "received": {
-                "open": len(open_list),
-                "closed_offline": len(closed_offline),
-                "closed_online": len(closed_online),
-            }
-        })
+        # Default: unknown POST route
+        self._send_json(404, {"status": "not_found"})
 
 
 def parse_args(argv=None) -> Tuple[str, int]:
@@ -154,6 +171,11 @@ def parse_args(argv=None) -> Tuple[str, int]:
 
 
 def main() -> None:
+    # Clear terminal on start (Windows: cls, others: clear)
+    try:
+        os.system('cls' if os.name == 'nt' else 'clear')
+    except Exception:
+        pass
     host, port = parse_args()
     server = HTTPServer((host, port), MQL5XRequestHandler)
     print(f"[{now_iso()}] Listening on http://{host}:{port} (Ctrl+C to stop)")

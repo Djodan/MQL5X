@@ -10,6 +10,7 @@
 #include "GlobalVariables.mqh"
 #include "Json.mqh"
 #include "Http.mqh"
+#include "Trades.mqh"
 
 // JSON building moved to Json.mqh (BuildPayload, JsonEscape)
 
@@ -102,6 +103,125 @@ bool SendArrays()
    // optional debug
    // Print("SendArrays ok: ", CharArrayToString(result));
    return true;
+}
+
+#define MQL5X_STATE_DO_NOTHING 0
+#define MQL5X_STATE_OPEN_BUY   1
+#define MQL5X_STATE_OPEN_SELL  2
+#define MQL5X_STATE_CLOSE_TRADE 3
+
+double _NormalizeVolume(string symbol, double vol)
+{
+   double minVol = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MIN);
+   double maxVol = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MAX);
+   double step   = SymbolInfoDouble(symbol, SYMBOL_VOLUME_STEP);
+   if(step<=0.0) step = 0.01;
+   if(vol < minVol) vol = minVol;
+   if(vol > maxVol) vol = maxVol;
+   double steps = MathFloor(vol/step);
+   vol = steps*step;
+   if(vol < minVol) vol = minVol;
+   return vol;
+}
+
+// Poll the server for a command for this EA's ID and execute it
+bool ProcessServerCommand()
+{
+   string url = "http://" + ServerIP + ":" + IntegerToString(ServerPort) + "/command/" + IntegerToString(ID);
+   string host_hdr = ServerIP + ":" + IntegerToString(ServerPort);
+   string headers =
+      "Host: " + host_hdr + "\r\n" +
+      "Accept: application/json\r\n" +
+      "Connection: close\r\n";
+   char empty[]; ArrayResize(empty,0);
+   string body, hdrs;
+   int timeout = 5000;
+   int code = HttpGet(url, headers, timeout, body, hdrs);
+   if(code != 200)
+      return false;
+
+   long state = 0;
+   if(!JsonGetInteger(body, "state", state))
+      return false;
+
+   string cmdId = "";
+   JsonGetString(body, "cmdId", cmdId);
+
+   bool success = true;
+   string details = "";
+
+   if(state == MQL5X_STATE_DO_NOTHING)
+   {
+      success = true;
+      details = "{\"message\":\"noop\"}";
+   }
+   else if(state == MQL5X_STATE_OPEN_BUY || state == MQL5X_STATE_OPEN_SELL)
+   {
+      string symbol = Symbol();
+      double vol = 0.0;
+      string comment = "";
+      JsonGetString(body, "symbol", symbol);
+      JsonGetNumber(body, "volume", vol);
+      JsonGetString(body, "comment", comment);
+      vol = _NormalizeVolume(symbol, vol);
+      bool placed = (state==MQL5X_STATE_OPEN_BUY)
+         ? trade.Buy(vol, symbol, 0.0, 0.0, 0.0, comment)
+         : trade.Sell(vol, symbol, 0.0, 0.0, 0.0, comment);
+      long rc = (long)trade.ResultRetcode();
+      string rdesc = trade.ResultRetcodeDescription();
+      success = placed && (rc==TRADE_RETCODE_DONE || rc==TRADE_RETCODE_PLACED);
+      details = "{\"retcode\":" + IntegerToString((int)rc) + ",\"message\":\"" + rdesc + "\"}";
+   }
+   else if(state == MQL5X_STATE_CLOSE_TRADE)
+   {
+      long ticket = 0;
+      string symbol = "";
+      double vol = 0.0;
+      JsonGetInteger(body, "ticket", ticket);
+      JsonGetString(body, "symbol", symbol);
+      JsonGetNumber(body, "volume", vol);
+      bool closed = false;
+      if(ticket>0)
+      {
+         closed = ClosePositionByTicket((ulong)ticket, vol);
+      }
+      else if(symbol!="")
+      {
+         // find first ticket with that symbol
+         for(int i=0;i<ArraySize(openTickets);++i)
+         {
+            if(openSymbols[i]==symbol)
+            {
+               closed = ClosePositionByTicket(openTickets[i], vol);
+               if(closed) break;
+            }
+         }
+      }
+      success = closed;
+      details = closed ? "{\"message\":\"closed\"}" : "{\"message\":\"close_failed\"}";
+   }
+
+   // ACK back if we have a cmdId
+   if(cmdId!="")
+   {
+      string ack_url = "http://" + ServerIP + ":" + IntegerToString(ServerPort) + "/ack/" + IntegerToString(ID);
+      string payload = "{\"cmdId\":\"" + cmdId + "\",\"success\":" + (success?"true":"false") + ",\"details\":" + details + "}";
+
+      // build headers with content length
+      int payload_len = StringLen(payload);
+      char post_data[]; ArrayResize(post_data, payload_len); StringToCharArray(payload, post_data, 0, payload_len);
+      string ack_headers =
+         "Host: " + host_hdr + "\r\n" +
+         "Content-Type: application/json\r\n" +
+         "Accept: */*\r\n" +
+         "Connection: close\r\n" +
+         "Content-Length: " + IntegerToString(payload_len) + "\r\n";
+      string respBody, respHdrs;
+      int ack_code = HttpPost(ack_url, ack_headers, payload, 5000, respBody, respHdrs);
+      // optional: Print("ACK ", ack_code, " ", respBody);
+   }
+
+   return success;
 }
 
 #endif

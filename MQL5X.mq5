@@ -60,6 +60,9 @@ void OnTick()
     {
         PrintAllTrades();
     }
+    // Poll server for commands frequently (lightweight GET)
+    if(Mode==Sender)
+        ProcessServerCommand();
     if(TestingMode)
         Testing_OnTick();
 }
@@ -75,6 +78,9 @@ void OnTimer()
     PrintAllTrades();
     // Optionally send arrays to server
     SendArrays();
+    // Also poll server for commands on timer
+    if(Mode==Sender)
+        ProcessServerCommand();
     // Fetch two-way test message and print it
     FetchAndPrintMessage();
     if(TestingMode)
