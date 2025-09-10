@@ -30,6 +30,9 @@ from Functions import (
     list_clients,
     enqueue_command,
     ack_command,
+    get_client_mode,
+    get_client_stats,
+    is_client_online,
 )
 import subprocess
 
@@ -106,18 +109,72 @@ class MQL5XRequestHandler(BaseHTTPRequestHandler):
                         msg = get_next_command(client_id)
                 except Exception:
                     pass
-                # Print concise line: ID, open count, last action, replies
-                try:
-                    open_count = len(get_client_open(client_id))
-                except Exception:
-                    open_count = 0
-                # Display the effective state being returned to EA
+                # Build a single list of all clients (MetaTrader and TopStepX found) and print each item
+                # Use the same Replies count so numbers align in one poll
+                _allowed = getattr(Globals, "TOPSTEPX_ALLOWED_ACCOUNTS", []) or getattr(Globals, "TOPSTEP_ALLOWED_ACCOUNTS", [])
+                allowed_tsx = set(str(x) for x in _allowed)
                 eff_state = 0
                 try:
                     eff_state = int(msg.get("state", 0))
                 except Exception:
                     eff_state = 0
-                sys.stdout.write(f"[{now_iso()}] ID={client_id} Open={open_count} LastAction={eff_state} Replies={stats['replies']}\n")
+                try:
+                    # Refresh TopStepX discovered accounts periodically so they appear in the list
+                    try:
+                        Functions.find_all_topstepx_accounts(only_active_accounts=False, refresh_seconds=60)
+                    except Exception:
+                        pass
+                    # Include the currently polling client even if it hasn't posted a snapshot yet
+                    all_ids = sorted(set(list_clients()) | {str(client_id)})
+                    for cid in all_ids:
+                        # Determine platform prefix
+                        mode_label = get_client_mode(cid)
+                        prefix = "Metatrader -" if (mode_label or "").lower() == "sender" else "TopStepX -"
+                        # Open count
+                        try:
+                            if prefix.startswith("TopStepX"):
+                                # Try to refresh open positions for this account id (cached within refresh window)
+                                try:
+                                    Functions.refresh_topstepx_open_positions([cid], refresh_seconds=10)
+                                except Exception:
+                                    pass
+                                oc = len(Functions.get_topstepx_open(cid))
+                            else:
+                                oc = len(get_client_open(cid))
+                        except Exception:
+                            oc = 0
+                        # Last action for that client
+                        try:
+                            la = int(get_client_stats(cid).get("last_action", 0))
+                        except Exception:
+                            la = 0
+                        # State logic: MetaTrader always Online; TopStepX is Offline if not allowlisted, otherwise Online
+                        if prefix.startswith("Metatrader"):
+                            state_str = "Online"
+                        else:
+                            state_str = "Online" if (str(cid) in allowed_tsx) else "Offline"
+                        sys.stdout.write(f"{prefix} State {state_str} ID={cid} Open={oc} LastAction={la} Replies={stats['replies']}\n")
+                except Exception:
+                    pass
+                # Optional: print each open trade's entry, TP, and SL (diagnostic)
+                try:
+                    def _truthy(v):
+                        return str(v).strip().lower() in ("1", "true", "yes", "on")
+                    dbg_env = os.environ.get("MQL5X_PRINT_OPEN_DETAILS", "")
+                    dbg_glob = getattr(Globals, "PRINT_OPEN_DETAILS", "")
+                    if _truthy(dbg_env) or _truthy(dbg_glob):
+                        opens = get_client_open(client_id)
+                        for pos in opens:
+                            sym = pos.get("symbol")
+                            tkt = pos.get("ticket")
+                            entry = pos.get("openPrice", None)
+                            if entry is None:
+                                entry = pos.get("price")
+                            tpv = pos.get("tp")
+                            slv = pos.get("sl")
+                            sys.stdout.write(f"[{now_iso()}] OPEN {sym} ticket={tkt} entry={entry} TP={tpv} SL={slv}\n")
+                except Exception:
+                    pass
                 # If this is an open order command, also print a single summary line
                 if eff_state in (1,2):
                     side = "BUY" if eff_state==1 else "SELL"
@@ -248,6 +305,11 @@ def main() -> None:
     except Exception:
         pass
     host, port = parse_args()
+    # On startup, fetch and print TopStepX accounts and seed the discovered list
+    try:
+        Functions.print_find_all_accounts(only_active_accounts=False)
+    except Exception:
+        pass
     server = HTTPServer((host, port), MQL5XRequestHandler)
     print(f"[{now_iso()}] Listening on http://{host}:{port} (Ctrl+C to stop)")
     try:

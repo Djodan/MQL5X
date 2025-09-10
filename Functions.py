@@ -9,8 +9,9 @@ import json
 import threading
 from copy import deepcopy
 from datetime import datetime, UTC
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Tuple, Optional, Set
 import uuid
+import time as _time
 
 LOG_FILE = "received_log.jsonl"
 
@@ -20,6 +21,19 @@ _CLIENT_OPEN: Dict[str, List[dict]] = {}
 _CLIENT_CLOSED_ONLINE: Dict[str, List[dict]] = {}
 _CLIENT_COMMANDS: Dict[str, List[dict]] = {}
 _CLIENT_STATS: Dict[str, Dict[str, int]] = {}  # { id: { replies: int, last_action: int } }
+_CLIENT_MODE: Dict[str, str] = {}  # { id: mode }
+_CLIENT_LAST_SEEN: Dict[str, float] = {}  # { id: epoch_seconds }
+
+# Discovered TopStepX accounts (from API) and cache of last fetch
+_DISCOVERED_TOPSTEPX_ACCOUNTS: Set[str] = set()
+_DISCOVERED_LAST_FETCHED: float = 0.0
+_DISCOVERED_LAST_RESPONSE: Optional[dict] = None
+
+# TopStepX per-account open/closed tracking
+_TOPSTEPX_OPEN: Dict[str, List[dict]] = {}
+_TOPSTEPX_CLOSED: Dict[str, List[dict]] = {}
+_TOPSTEPX_LAST_POS_IDS: Dict[str, Set[str]] = {}
+_TOPSTEPX_LAST_POLL_TIME: Dict[str, float] = {}
 
 
 def now_iso() -> str:
@@ -61,6 +75,7 @@ def record_client_snapshot(client_id: str, open_list: List[dict], closed_online:
     with _LOCK:
         _CLIENT_OPEN[client_id] = deepcopy(open_list) if open_list is not None else []
         _CLIENT_CLOSED_ONLINE[client_id] = deepcopy(closed_online) if closed_online is not None else []
+    _CLIENT_LAST_SEEN[client_id] = _time.time()
 
 
 def ingest_payload(data: dict) -> Tuple[dict, dict]:
@@ -81,6 +96,9 @@ def ingest_payload(data: dict) -> Tuple[dict, dict]:
 
     # Update in-memory per-client snapshots
     record_client_snapshot(client_id, open_list, closed_online)
+    # Store/refresh client mode label for logging
+    with _LOCK:
+        _CLIENT_MODE[client_id] = str(mode) if mode is not None else ""
 
     summary = {
         "open": len(open_list),
@@ -104,7 +122,15 @@ def get_client_closed_online(client_id: str) -> List[dict]:
 def list_clients() -> List[str]:
     with _LOCK:
         # Union keys across both maps in case one side hasn't reported yet
-        return sorted(set(_CLIENT_OPEN.keys()) | set(_CLIENT_CLOSED_ONLINE.keys()))
+        base = set(_CLIENT_OPEN.keys()) | set(_CLIENT_CLOSED_ONLINE.keys())
+        # Include any discovered TopStepX account ids as well
+        base |= set(_DISCOVERED_TOPSTEPX_ACCOUNTS)
+        return sorted(base)
+
+
+def get_client_mode(client_id: str) -> str:
+    with _LOCK:
+        return _CLIENT_MODE.get(str(client_id), "")
 
 
 # ---------------------- Command queue (server -> EA) ----------------------
@@ -208,3 +234,236 @@ def record_command_delivery(client_id: str, state: int) -> Dict[str, int]:
 def get_client_stats(client_id: str) -> Dict[str, int]:
     with _LOCK:
         return deepcopy(_CLIENT_STATS.get(str(client_id), {"replies": 0, "last_action": 0}))
+
+
+def get_client_last_seen(client_id: str) -> float:
+    with _LOCK:
+        return float(_CLIENT_LAST_SEEN.get(str(client_id), 0.0))
+
+
+def is_client_online(client_id: str, timeout_seconds: int = 10) -> bool:
+    try:
+        last = get_client_last_seen(client_id)
+        if last <= 0:
+            return False
+        return (_time.time() - last) <= timeout_seconds
+    except Exception:
+        return False
+
+
+# ---------------------- TopStepX account discovery ----------------------
+
+def find_all_topstepx_accounts(only_active_accounts: bool = False, refresh_seconds: int = 60) -> dict:
+    """
+    Call TopStepX Account/search API (like TopStepX_Files/Find_All_Accounts.py) and cache results.
+    Extract account ids and add them to the global client list so they print in status output.
+    Returns the parsed JSON response (or {} on error).
+    """
+    global _DISCOVERED_LAST_FETCHED, _DISCOVERED_LAST_RESPONSE
+    try:
+        now = _time.time()
+        if (now - _DISCOVERED_LAST_FETCHED) < max(1, int(refresh_seconds)) and _DISCOVERED_LAST_RESPONSE is not None:
+            return _DISCOVERED_LAST_RESPONSE
+    except Exception:
+        pass
+
+    # Perform network call
+    try:
+        import requests  # rely on same dependency used in TopStepX_Files
+        import Globals
+
+        API_URL = "https://api.topstepx.com/api/Account/search"
+        headers = {
+            "Authorization": f"Bearer {getattr(Globals, 'KEY_ACCESS_TOKEN', '')}",
+            "Content-Type": "application/json",
+        }
+        payload = {"onlyActiveAccounts": bool(only_active_accounts)}
+
+        resp = requests.post(API_URL, json=payload, headers=headers, timeout=10)
+        data: dict
+        try:
+            data = resp.json()
+        except Exception:
+            data = {"success": False, "status": resp.status_code, "raw": resp.text}
+
+        # Update cache timestamps regardless
+        _DISCOVERED_LAST_FETCHED = _time.time()
+        _DISCOVERED_LAST_RESPONSE = data
+
+        # Extract accounts -> ids
+        accounts = []
+        try:
+            if isinstance(data, dict):
+                accounts = data.get("accounts") or []
+        except Exception:
+            accounts = []
+
+        ids: List[str] = []
+        for acc in accounts:
+            try:
+                aid = str(acc.get("id"))
+                if aid and aid != "None":
+                    ids.append(aid)
+            except Exception:
+                continue
+
+        if ids:
+            with _LOCK:
+                for aid in ids:
+                    _DISCOVERED_TOPSTEPX_ACCOUNTS.add(aid)
+                    # Mark mode to help status prefix classify as TopStepX
+                    _CLIENT_MODE.setdefault(aid, "TopStepX")
+
+        return data
+    except Exception:
+        # On any failure, do not crash server; return last or empty
+        return _DISCOVERED_LAST_RESPONSE or {}
+
+
+def get_discovered_topstepx_accounts() -> List[str]:
+    with _LOCK:
+        return sorted(_DISCOVERED_TOPSTEPX_ACCOUNTS)
+
+
+def refresh_topstepx_open_positions(account_ids: Optional[List[str]] = None, refresh_seconds: int = 10, timeout: int = 10) -> None:
+    """
+    For each TopStepX account id, call Position/searchOpen and update per-account open list.
+    Also detect closures by diffing with previous snapshot and append to closed list.
+    """
+    try:
+        import requests
+        import Globals
+    except Exception:
+        return
+
+    ids = account_ids or get_discovered_topstepx_accounts()
+    if not ids:
+        return
+
+    for aid in ids:
+        try:
+            now = _time.time()
+            last_poll = _TOPSTEPX_LAST_POLL_TIME.get(aid, 0.0)
+            if (now - last_poll) < max(1, int(refresh_seconds)):
+                continue
+
+            headers = {
+                "Authorization": f"Bearer {getattr(Globals, 'KEY_ACCESS_TOKEN', '')}",
+                "Content-Type": "application/json",
+            }
+            payload = {"accountId": int(aid) if aid.isdigit() else aid}
+            url = "https://api.topstepx.com/api/Position/searchOpen"
+
+            resp = requests.post(url, json=payload, headers=headers, timeout=timeout)
+            try:
+                data = resp.json()
+            except Exception:
+                data = {"success": False, "status": resp.status_code}
+
+            positions = []
+            if isinstance(data, dict):
+                positions = data.get("positions") or []
+
+            # Normalize to string ids
+            cur_ids: Set[str] = set()
+            for p in positions:
+                try:
+                    cur_ids.add(str(p.get("id")))
+                except Exception:
+                    continue
+
+            with _LOCK:
+                prev_ids = _TOPSTEPX_LAST_POS_IDS.get(aid, set())
+                # Detect closed: in prev but not in current
+                closed_ids = prev_ids - cur_ids
+                if closed_ids:
+                    # Append minimal records to closed list
+                    lst = _TOPSTEPX_CLOSED.setdefault(aid, [])
+                    ts = now_iso()
+                    for cid in closed_ids:
+                        lst.append({"id": cid, "closedAt": ts, "accountId": aid})
+                # Store current snapshot
+                _TOPSTEPX_OPEN[aid] = deepcopy(positions)
+                _TOPSTEPX_LAST_POS_IDS[aid] = set(cur_ids)
+                _TOPSTEPX_LAST_POLL_TIME[aid] = now
+                # Ensure mode classification
+                _CLIENT_MODE.setdefault(aid, "TopStepX")
+        except Exception:
+            # Skip errors per account; keep last snapshot
+            continue
+
+
+def get_topstepx_open(account_id: str) -> List[dict]:
+    with _LOCK:
+        return deepcopy(_TOPSTEPX_OPEN.get(str(account_id), []))
+
+
+def get_topstepx_closed(account_id: str) -> List[dict]:
+    with _LOCK:
+        return deepcopy(_TOPSTEPX_CLOSED.get(str(account_id), []))
+
+
+def print_find_all_accounts(only_active_accounts: bool = False, timeout: int = 10) -> dict:
+    """
+    Produce the same console output as TopStepX_Files/Find_All_Accounts.py and update discovered IDs.
+    Prints:
+      Status: <code>
+      Response: <json>  (or Raw Response: <text>)
+    Returns parsed JSON (or minimal dict on error).
+    """
+    try:
+        import requests
+        import Globals
+    except Exception:
+        print("Status:", -1)
+        print("Raw Response:", "requests/Globals not available")
+        return {"success": False}
+
+    API_URL = "https://api.topstepx.com/api/Account/search"
+    headers = {
+        "Authorization": f"Bearer {getattr(Globals, 'KEY_ACCESS_TOKEN', '')}",
+        "Content-Type": "application/json",
+    }
+    payload = {"onlyActiveAccounts": bool(only_active_accounts)}
+
+    try:
+        resp = requests.post(API_URL, json=payload, headers=headers, timeout=timeout)
+        status_code = resp.status_code
+        try:
+            data = resp.json()
+        except Exception:
+            data = {"success": False, "status": status_code}
+
+        # Extract IDs
+        accounts = data.get("accounts") if isinstance(data, dict) else []
+        ids = []
+        if isinstance(accounts, list):
+            for acc in accounts:
+                try:
+                    aid = str(acc.get("id")) if isinstance(acc, dict) else None
+                    if aid:
+                        ids.append(aid)
+                except Exception:
+                    continue
+
+        # Print concise output
+        print("Status:", status_code)
+        print("IDs Found:", ", ".join(ids) if ids else "")
+
+        # Update discovered cache and client modes
+        if ids:
+            with _LOCK:
+                for aid in ids:
+                    _DISCOVERED_TOPSTEPX_ACCOUNTS.add(aid)
+                    _CLIENT_MODE.setdefault(aid, "TopStepX")
+            try:
+                global _DISCOVERED_LAST_FETCHED, _DISCOVERED_LAST_RESPONSE
+                _DISCOVERED_LAST_FETCHED = _time.time()
+                _DISCOVERED_LAST_RESPONSE = data
+            except Exception:
+                pass
+        return data
+    except Exception as exc:
+        print("Status:", -1)
+        print("IDs Found:")
+        return {"success": False, "error": str(exc)}
