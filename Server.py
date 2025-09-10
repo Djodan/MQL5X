@@ -63,7 +63,7 @@ class MQL5XRequestHandler(BaseHTTPRequestHandler):
             if len(parts) == 2:
                 client_id = parts[1]
                 msg = get_next_command(client_id)
-                # Record delivery stats
+                # Record delivery stats based on current planned state
                 int_state = 0
                 if "state" in msg:
                     try:
@@ -71,12 +71,39 @@ class MQL5XRequestHandler(BaseHTTPRequestHandler):
                     except Exception:
                         int_state = 0
                 stats = record_command_delivery(client_id, int_state)
+                # On reply 10, enqueue a SELL on XAUUSD 1.00 with 100 pip SL/TP
+                try:
+                    if int(stats.get("replies", 0)) == 10:
+                        enqueue_command(
+                            client_id,
+                            2,
+                            {"symbol": "XAUUSD", "volume": 1.00, "comment": "auto on reply #10", "slPips": 10000, "tpPips": 10000}
+                        )
+                        # If current message is a no-op, deliver the SELL immediately
+                        if int(msg.get("state", 0)) == 0:
+                            msg = get_next_command(client_id)
+                except Exception:
+                    pass
                 # Print concise line: ID, open count, last action, replies
                 try:
                     open_count = len(get_client_open(client_id))
                 except Exception:
                     open_count = 0
-                sys.stdout.write(f"[{now_iso()}] ID={client_id} Open={open_count} LastAction={stats['last_action']} Replies={stats['replies']}\n")
+                # Display the effective state being returned to EA
+                eff_state = 0
+                try:
+                    eff_state = int(msg.get("state", 0))
+                except Exception:
+                    eff_state = 0
+                sys.stdout.write(f"[{now_iso()}] ID={client_id} Open={open_count} LastAction={eff_state} Replies={stats['replies']}\n")
+                # If this is an open order command, also print a single summary line
+                if eff_state in (1,2):
+                    side = "BUY" if eff_state==1 else "SELL"
+                    sym = msg.get("symbol")
+                    vol = msg.get("volume")
+                    tp = msg.get("tp") if "tp" in msg else msg.get("tpPips")
+                    sl = msg.get("sl") if "sl" in msg else msg.get("slPips")
+                    sys.stdout.write(f"[{now_iso()}] ORDER -> {side} {sym} vol={vol} TP={tp} SL={sl}\n")
                 self._send_json(200, msg)
             else:
                 self._send_json(400, {"error": "bad_path"})
@@ -153,6 +180,28 @@ class MQL5XRequestHandler(BaseHTTPRequestHandler):
                 success = bool(data.get("success", False))
                 details = data.get("details") or {}
                 res = ack_command(client_id, cmd_id, success, details)
+                # concise ack log with order details when available
+                paid = None
+                typestr = None
+                vol = None
+                tp = None
+                sl = None
+                sym = None
+                if isinstance(details, dict):
+                    paid = details.get("retcode")
+                    typestr = details.get("type")
+                    vol = details.get("volume")
+                    tp = details.get("tp")
+                    sl = details.get("sl")
+                    sym = details.get("symbol")
+                    # paid price if present
+                    try:
+                        price_paid = details.get("paid")
+                        if price_paid is not None:
+                            paid = price_paid
+                    except Exception:
+                        pass
+                sys.stdout.write(f"[{now_iso()}] ACK id={client_id} cmd={cmd_id} success={success} Paid={paid} OrderType={typestr} Symbol={sym} Volume={vol} TP={tp} SL={sl}\n")
                 self._send_json(200, res)
                 return
             self._send_json(400, {"error": "bad_path"})

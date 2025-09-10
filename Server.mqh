@@ -28,7 +28,7 @@ void HealthCheck()
    string body, hdrs;
    int timeout = 5000;
    int code = HttpGet(url, headers, timeout, body, hdrs);
-   Print("HealthCheck GET ", url, " -> code=", code, " hdr=", hdrs, " body=", body);
+   // Print("HealthCheck GET ", url, " -> code=", code, " hdr=", hdrs, " body=", body);
 }
 
 // Fetch message from server and print to Experts tab
@@ -56,13 +56,13 @@ void FetchAndPrintMessage()
          if(start>=0 && end>start)
          {
             string msg = StringSubstr(body, start+1, end-start-1);
-            Print("Server message: ", msg);
+            // Print("Server message: ", msg);
          }
       }
    }
    else
    {
-      Print("FetchAndPrintMessage FAILED code=", code, " hdr=", hdrs);
+   // Print("FetchAndPrintMessage FAILED code=", code, " hdr=", hdrs);
    }
 }
 
@@ -86,20 +86,20 @@ bool SendArrays()
       "Content-Length: " + IntegerToString(payload_len) + "\r\n";
    // Build URL from IP + Port
    string url = "http://" + ServerIP + ":" + IntegerToString(ServerPort) + "/";
-   Print("SendArrays: POST ", url, " len=", payload_len);
+   // Print("SendArrays: POST ", url, " len=", payload_len);
    int timeout = 15000;
    string respBody, respHdrs;
    int code = HttpPost(url, headers, payload, timeout, respBody, respHdrs);
    if(code!=200)
    {
       int lastErr = GetLastError();
-      Print("SendArrays FAILED: code=", code, " lastError=", lastErr, " hdr=", respHdrs, " resp=", respBody);
-      Print("Tip: Ensure Tools > Options > Expert Advisors > Allow WebRequest includes ", url);
+   // Print("SendArrays FAILED: code=", code, " lastError=", lastErr, " hdr=", respHdrs, " resp=", respBody);
+   // Print("Tip: Ensure Tools > Options > Expert Advisors > Allow WebRequest includes ", url);
    // Probe connectivity to help debug
    HealthCheck();
       return false;
    }
-   Print("SendArrays OK");
+   // Print("SendArrays OK");
    // optional debug
    // Print("SendArrays ok: ", CharArrayToString(result));
    return true;
@@ -163,14 +163,59 @@ bool ProcessServerCommand()
       JsonGetString(body, "symbol", symbol);
       JsonGetNumber(body, "volume", vol);
       JsonGetString(body, "comment", comment);
+      // Optional: absolute SL/TP or pip distances
+      double absSL = 0.0, absTP = 0.0;
+      double slPips = 0.0, tpPips = 0.0;
+      JsonGetNumber(body, "sl", absSL);
+      JsonGetNumber(body, "tp", absTP);
+      JsonGetNumber(body, "slPips", slPips);
+      JsonGetNumber(body, "tpPips", tpPips);
+
+      // Compute SL/TP if pip distances provided
+      double pt = SymbolInfoDouble(symbol, SYMBOL_POINT);
+      int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+      double pip = pt;
+      if(digits==3 || digits==5) pip = pt*10.0; // common pip definition for 3/5-digit symbols
+
+      double ask = SymbolInfoDouble(symbol, SYMBOL_ASK);
+      double bid = SymbolInfoDouble(symbol, SYMBOL_BID);
+      if(absSL==0.0 && slPips>0.0)
+      {
+         if(state==MQL5X_STATE_OPEN_BUY) absSL = ask - slPips * pip; else absSL = bid + slPips * pip;
+      }
+      if(absTP==0.0 && tpPips>0.0)
+      {
+         if(state==MQL5X_STATE_OPEN_BUY) absTP = ask + tpPips * pip; else absTP = bid - tpPips * pip;
+      }
+
       vol = _NormalizeVolume(symbol, vol);
       bool placed = (state==MQL5X_STATE_OPEN_BUY)
-         ? trade.Buy(vol, symbol, 0.0, 0.0, 0.0, comment)
-         : trade.Sell(vol, symbol, 0.0, 0.0, 0.0, comment);
-      long rc = (long)trade.ResultRetcode();
-      string rdesc = trade.ResultRetcodeDescription();
+         ? trade.Buy(vol, symbol, 0.0, absSL, absTP, comment)
+         : trade.Sell(vol, symbol, 0.0, absSL, absTP, comment);
+   long rc = (long)trade.ResultRetcode();
+   string rdesc = trade.ResultRetcodeDescription();
+   double exe_price = trade.ResultPrice();
       success = placed && (rc==TRADE_RETCODE_DONE || rc==TRADE_RETCODE_PLACED);
-      details = "{\"retcode\":" + IntegerToString((int)rc) + ",\"message\":\"" + rdesc + "\"}";
+      string typestr = (state==MQL5X_STATE_OPEN_BUY) ? "BUY" : "SELL";
+      int sd = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+      string jvol = DoubleToString(vol, 2);
+   string jsl = DoubleToString(absSL, sd);
+   string jpaid = DoubleToString(exe_price, sd);
+      string jtp = DoubleToString(absTP, sd);
+      if(placed)
+      {
+         Print("TRADE PLACED: ", typestr, " ", symbol, " Vol=", jvol, " Price=", jpaid, " TP=", jtp, " SL=", jsl, " Retcode=", (int)rc, " ", rdesc);
+      }
+      details = "{"+
+         "\"retcode\":" + IntegerToString((int)rc) + ","+
+         "\"message\":\"" + JsonEscape(rdesc) + "\","+
+         "\"symbol\":\"" + symbol + "\","+
+         "\"type\":\"" + typestr + "\","+
+         "\"volume\":" + jvol + ","+
+         "\"paid\":" + jpaid + ","+
+         "\"sl\":" + jsl + ","+
+         "\"tp\":" + jtp +
+      "}";
    }
    else if(state == MQL5X_STATE_CLOSE_TRADE)
    {

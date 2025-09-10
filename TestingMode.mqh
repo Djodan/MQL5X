@@ -76,7 +76,7 @@ void Testing_HandleOpenedPosition(ulong position_ticket)
 // Called once at init when TestingMode is enabled
 void Testing_OnInit()
 {
-   Print("[Testing] Mode enabled.");
+   // Print("[Testing] Mode enabled.");
 }
 
 // Called on every tick when TestingMode is enabled

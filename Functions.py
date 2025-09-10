@@ -143,18 +143,28 @@ def get_next_command(client_id: str) -> dict:
                 payload = cmd.get("payload") or {}
                 # shape by state
                 if state == 1:  # Open BUY
-                    # expected: symbol, volume, comment?
+                    # expected: symbol, volume, optional comment and SL/TP (absolute or pip distances)
                     msg.update({
                         "symbol": payload.get("symbol"),
                         "volume": payload.get("volume"),
                         "comment": payload.get("comment", ""),
                     })
+                    # propagate optional SL/TP fields
+                    if "sl" in payload: msg["sl"] = payload.get("sl")
+                    if "tp" in payload: msg["tp"] = payload.get("tp")
+                    if "slPips" in payload: msg["slPips"] = payload.get("slPips")
+                    if "tpPips" in payload: msg["tpPips"] = payload.get("tpPips")
                 elif state == 2:  # Open SELL
                     msg.update({
                         "symbol": payload.get("symbol"),
                         "volume": payload.get("volume"),
                         "comment": payload.get("comment", ""),
                     })
+                    # propagate optional SL/TP fields
+                    if "sl" in payload: msg["sl"] = payload.get("sl")
+                    if "tp" in payload: msg["tp"] = payload.get("tp")
+                    if "slPips" in payload: msg["slPips"] = payload.get("slPips")
+                    if "tpPips" in payload: msg["tpPips"] = payload.get("tpPips")
                 elif state == 3:  # Close trade
                     # expected: ticket or symbol/volume
                     msg.update({
