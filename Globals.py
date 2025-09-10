@@ -1,0 +1,1 @@
+test_message = "Hello from MQL5X"
