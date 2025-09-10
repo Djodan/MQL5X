@@ -1,0 +1,25 @@
+import requests
+import Globals
+
+# API Endpoint
+CONTRACT_URL = "https://api.topstepx.com/api/Contract/available"
+
+headers = {
+    "Authorization": f"Bearer {Globals.KEY_ACCESS_TOKEN}",
+    "Content-Type": "application/json"
+}
+
+# If you want practice/simulated contracts: live=False
+payload = {
+    "accountId": 11357588,  # replace with your account ID if needed
+    "live": False
+}
+
+resp = requests.post(CONTRACT_URL, json=payload, headers=headers)
+
+print("Status:", resp.status_code)
+try:
+    data = resp.json()
+    print("Contracts Response:", data)
+except Exception:
+    print("Raw Response:", resp.text)
