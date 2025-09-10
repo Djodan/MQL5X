@@ -387,3 +387,28 @@ class CanonicalClosedTrade:
 ---
 
 With this canonical shape and adapters, you can read inputs from either side and emit correctly shaped outputs without losing information.
+
+## Operational logging (preferred format)
+
+The Python server emits a concise per-client status line on each command poll. This is the preferred print statement and should remain stable:
+
+```
+[YYYY-MM-DDThh:mm:ss+00:00] ID=<id> Open=<count> LastAction=<state> Replies=<n>
+```
+
+- Example:
+  - `[2025-09-10T03:57:03+00:00] ID=1 Open=1 LastAction=0 Replies=43`
+- Fields:
+  - ID: EA client identifier
+  - Open: number of currently open positions tracked for that client
+  - LastAction: state returned in the last /command response (0 no-op, 1 BUY, 2 SELL, 3 CLOSE)
+  - Replies: number of polls served for that client
+
+When an order command is delivered or acknowledged, the server may emit supplemental lines:
+
+```
+[ts] ORDER -> BUY|SELL <symbol> vol=<lots> TP=<tp|tpPips> SL=<sl|slPips>
+[ts] ACK id=<id> cmd=<uuid> success=<bool> Paid=<price|retcode> OrderType=<BUY|SELL> Symbol=<symbol> Volume=<lots> TP=<tp> SL=<sl>
+```
+
+These are secondary; the per-client status line above is the canonical operational heartbeat.

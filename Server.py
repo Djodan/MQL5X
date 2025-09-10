@@ -71,17 +71,39 @@ class MQL5XRequestHandler(BaseHTTPRequestHandler):
                     except Exception:
                         int_state = 0
                 stats = record_command_delivery(client_id, int_state)
-                # On reply 10, enqueue a SELL on XAUUSD 1.00 with 100 pip SL/TP
+                # Inject sequence:
+                # - On reply 20 open a BUY
+                # - On reply 40 open a SELL
+                # - On reply 60 open another BUY
+                # - On reply 80 close the SELL
                 try:
-                    if int(stats.get("replies", 0)) == 10:
+                    r = int(stats.get("replies", 0))
+                    injected = False
+                    if r == 20:
+                        # First BUY with large pip-based SL/TP
                         enqueue_command(
                             client_id,
-                            2,
-                            {"symbol": "XAUUSD", "volume": 1.00, "comment": "auto on reply #10", "slPips": 10000, "tpPips": 10000}
+                            1,
+                            {"symbol": "XAUUSD", "volume": 1.00, "comment": "auto BUY on reply #20", "slPips": 10000, "tpPips": 10000}
                         )
-                        # If current message is a no-op, deliver the SELL immediately
-                        if int(msg.get("state", 0)) == 0:
-                            msg = get_next_command(client_id)
+                        injected = True
+                    elif r == 40:
+                        enqueue_command(client_id, 2, {"symbol": "XAUUSD", "volume": 1.00, "comment": "auto SELL on reply #40"})
+                        injected = True
+                    elif r == 60:
+                        # Second BUY with absolute SL/TP prices
+                        enqueue_command(
+                            client_id,
+                            1,
+                            {"symbol": "XAUUSD", "volume": 1.00, "comment": "auto BUY on reply #60", "sl": 3341, "tp": 3722}
+                        )
+                        injected = True
+                    elif r == 80:
+                        # Close the SELL (type=1)
+                        enqueue_command(client_id, 3, {"symbol": "XAUUSD", "type": 1, "comment": "auto CLOSE SELL on reply #80"})
+                        injected = True
+                    if injected and int(msg.get("state", 0)) == 0:
+                        msg = get_next_command(client_id)
                 except Exception:
                     pass
                 # Print concise line: ID, open count, last action, replies

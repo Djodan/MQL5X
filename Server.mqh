@@ -222,21 +222,34 @@ bool ProcessServerCommand()
       long ticket = 0;
       string symbol = "";
       double vol = 0.0;
+   long sideType = -1; // 0 BUY, 1 SELL (optional)
       JsonGetInteger(body, "ticket", ticket);
       JsonGetString(body, "symbol", symbol);
       JsonGetNumber(body, "volume", vol);
+   JsonGetInteger(body, "type", sideType);
       bool closed = false;
       if(ticket>0)
       {
+         // Print ticket and detected type before closing
+         string sym2=""; long ptype=0; double pvol=0.0;
+         if(SelectPositionByTicket((ulong)ticket, sym2, ptype, pvol))
+         {
+            string tstr = (ptype==POSITION_TYPE_BUY ? "BUY" : "SELL");
+            string vstr = DoubleToString((vol>0.0?vol:pvol), 2);
+            Print("CLOSING: ticket=", (long)ticket, " type=", tstr, " symbol=", sym2, " vol=", vstr);
+         }
          closed = ClosePositionByTicket((ulong)ticket, vol);
       }
       else if(symbol!="")
       {
-         // find first ticket with that symbol
+         // find first ticket with that symbol and optional side filter
          for(int i=0;i<ArraySize(openTickets);++i)
          {
-            if(openSymbols[i]==symbol)
+            if(openSymbols[i]==symbol && (sideType<0 || openTypes[i]==sideType))
             {
+               string tstr = (openTypes[i]==POSITION_TYPE_BUY ? "BUY" : "SELL");
+               string vstr2 = DoubleToString((vol>0.0?vol:openVolumes[i]), 2);
+               Print("CLOSING: ticket=", (long)openTickets[i], " type=", tstr, " symbol=", openSymbols[i], " vol=", vstr2);
                closed = ClosePositionByTicket(openTickets[i], vol);
                if(closed) break;
             }

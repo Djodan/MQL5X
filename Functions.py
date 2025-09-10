@@ -171,6 +171,7 @@ def get_next_command(client_id: str) -> dict:
                         "ticket": payload.get("ticket"),
                         "symbol": payload.get("symbol"),
                         "volume": payload.get("volume"),
+                        "type": payload.get("type"),  # optional: 0 buy, 1 sell
                     })
                 # state 0: do nothing
                 return msg
