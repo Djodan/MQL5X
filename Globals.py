@@ -1,9 +1,4 @@
-test_message = "Hello from MQL5X"
+# Shared globals for the Python server
+# Two-way communication test value
 
-# List of TopStepX account IDs that should be considered "in scope" for status.
-# Any TopStepX client whose ID is not in this list will be shown as Offline.
-TOPSTEPX_ALLOWED_ACCOUNTS = [11357588, 22222222]
-KEY_API_KEY = "9TvoFi9dLoJIYiIKCrT4/yPfWrGolM9aikkwZe13WMc="
-KEY_API_KEY_2 = "+QdvrXZ/e9NlZXxa/+S0KFDkiAoaHnnb468AazDdS4Q="
-username = "Dmaviaki@gmail.com"
-KEY_ACCESS_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6IjMzMTI2NSIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL3NpZCI6ImI2MzdjOTBkLWUxOGItNDY0OS1hYTkwLWNiNjE5ZmM1OWM4MCIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL25hbWUiOiJkbWF2aWFraUBnbWFpbC5jb20iLCJodHRwOi8vc2NoZW1hcy5taWNyb3NvZnQuY29tL3dzLzIwMDgvMDYvaWRlbnRpdHkvY2xhaW1zL3JvbGUiOiJ1c2VyIiwiaHR0cDovL3NjaGVtYXMubWljcm9zb2Z0LmNvbS93cy8yMDA4LzA2L2lkZW50aXR5L2NsYWltcy9hdXRoZW50aWNhdGlvbm1ldGhvZCI6ImFwaS1rZXkiLCJtc2QiOiJDTUVHUk9VUF9UT0IiLCJtZmEiOiJ2ZXJpZmllZCIsImV4cCI6MTc1NzU1MzQxMH0.-7doaxwt9NLShRf1bCjrHlWKcu5f7qFxbdoG_8rtRDo"
+test_message = "HELLO"

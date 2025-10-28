@@ -80,50 +80,51 @@ class MQL5XRequestHandler(BaseHTTPRequestHandler):
                 # - On reply 60 open another BUY
                 # - On reply 80 close the SELL
                 try:
-                    r = int(stats.get("replies", 0))
-                    injected = False
-                    if r == 20:
-                        # First BUY with large pip-based SL/TP
-                        enqueue_command(
-                            client_id,
-                            1,
-                            {"symbol": "XAUUSD", "volume": 1.00, "comment": "auto BUY on reply #20", "slPips": 10000, "tpPips": 10000}
-                        )
-                        # Mirror on TopStepX
-                        try:
-                            Functions.topstepx_mirror_mt5_sequence_step(20)
-                        except Exception:
-                            pass
-                        injected = True
-                    elif r == 40:
-                        enqueue_command(client_id, 2, {"symbol": "XAUUSD", "volume": 1.00, "comment": "auto SELL on reply #40"})
-                        try:
-                            Functions.topstepx_mirror_mt5_sequence_step(40)
-                        except Exception:
-                            pass
-                        injected = True
-                    elif r == 60:
-                        # Second BUY with absolute SL/TP prices
-                        enqueue_command(
-                            client_id,
-                            1,
-                            {"symbol": "XAUUSD", "volume": 1.00, "comment": "auto BUY on reply #60", "sl": 3341, "tp": 3722}
-                        )
-                        try:
-                            Functions.topstepx_mirror_mt5_sequence_step(60)
-                        except Exception:
-                            pass
-                        injected = True
-                    elif r == 80:
-                        # Close the SELL (type=1)
-                        enqueue_command(client_id, 3, {"symbol": "XAUUSD", "type": 1, "comment": "auto CLOSE SELL on reply #80"})
-                        try:
-                            Functions.topstepx_mirror_mt5_sequence_step(80)
-                        except Exception:
-                            pass
-                        injected = True
-                    if injected and int(msg.get("state", 0)) == 0:
-                        msg = get_next_command(client_id)
+                    if getattr(Globals, "TESTER_MODE", False):
+                        r = int(stats.get("replies", 0))
+                        injected = False
+                        if r == 20:
+                            # First BUY with large pip-based SL/TP
+                            enqueue_command(
+                                client_id,
+                                1,
+                                {"symbol": "XAUUSD", "volume": 1.00, "comment": "auto BUY on reply #20", "slPips": 10000, "tpPips": 10000}
+                            )
+                            # Mirror on TopStepX
+                            try:
+                                Functions.topstepx_mirror_mt5_sequence_step(20)
+                            except Exception:
+                                pass
+                            injected = True
+                        elif r == 40:
+                            enqueue_command(client_id, 2, {"symbol": "XAUUSD", "volume": 1.00, "comment": "auto SELL on reply #40"})
+                            try:
+                                Functions.topstepx_mirror_mt5_sequence_step(40)
+                            except Exception:
+                                pass
+                            injected = True
+                        elif r == 60:
+                            # Second BUY with absolute SL/TP prices
+                            enqueue_command(
+                                client_id,
+                                1,
+                                {"symbol": "XAUUSD", "volume": 1.00, "comment": "auto BUY on reply #60", "sl": 3341, "tp": 3722}
+                            )
+                            try:
+                                Functions.topstepx_mirror_mt5_sequence_step(60)
+                            except Exception:
+                                pass
+                            injected = True
+                        elif r == 80:
+                            # Close the SELL (type=1)
+                            enqueue_command(client_id, 3, {"symbol": "XAUUSD", "type": 1, "comment": "auto CLOSE SELL on reply #80"})
+                            try:
+                                Functions.topstepx_mirror_mt5_sequence_step(80)
+                            except Exception:
+                                pass
+                            injected = True
+                        if injected and int(msg.get("state", 0)) == 0:
+                            msg = get_next_command(client_id)
                 except Exception:
                     pass
                 # Build a single list of all clients (MetaTrader and TopStepX found) and print each item
@@ -170,7 +171,77 @@ class MQL5XRequestHandler(BaseHTTPRequestHandler):
                         # Colorize State text: green for Online, red for Offline
                         color = "\x1b[32m" if state_str == "Online" else "\x1b[31m"
                         reset = "\x1b[0m"
-                        sys.stdout.write(f"{prefix} {color}State {state_str}{reset} ID={cid} Open={oc} LastAction={la} Replies={stats['replies']}\n")
+                        try:
+                            show = bool(getattr(Globals, "PRINT_STATUS_LINES", False))
+                        except Exception:
+                            show = False
+                        if show:
+                            sys.stdout.write(f"{prefix} {color}State {state_str}{reset} ID={cid} Open={oc} LastAction={la} Replies={stats['replies']}\n")
+                except Exception:
+                    pass
+                # New concise view: main MT5 account vs TopStepX
+                try:
+                    main_id = str(getattr(Globals, "MAIN_MT5_ACCOUNT", ""))
+                except Exception:
+                    main_id = ""
+                try:
+                    if main_id:
+                        main_open = get_client_open(main_id)
+                        sys.stdout.write(f"Trades on main account : {len(main_open)}\n")
+                        for p in main_open:
+                            try:
+                                side = "BUY" if int(p.get("type", 0)) == 0 else "SELL"
+                            except Exception:
+                                side = str(p.get("type"))
+                            entry = p.get("openPrice", None)
+                            if entry is None:
+                                entry = p.get("price")
+                            vol = p.get("volume")
+                            tpv = p.get("tp")
+                            slv = p.get("sl")
+                            sys.stdout.write(f"  Type\n    {side}\n")
+                            sys.stdout.write(f"  Entry\n    {entry}\n")
+                            sys.stdout.write(f"  Volume\n    {vol}\n")
+                            if vol is not None:
+                                try:
+                                    sys.stdout.write(f"  size\n    {int(vol)}\n")
+                                except Exception:
+                                    pass
+                            sys.stdout.write(f"  TP\n    {tpv}\n")
+                            sys.stdout.write(f"  SL\n    {slv}\n")
+                except Exception:
+                    pass
+                try:
+                    tsx_ids = []
+                    try:
+                        tsx_ids = Functions.get_discovered_topstepx_accounts()
+                    except Exception:
+                        tsx_ids = []
+                    # If none discovered yet, fall back to allowlist
+                    if not tsx_ids:
+                        _allowed = getattr(Globals, "TOPSTEPX_ALLOWED_ACCOUNTS", []) or getattr(Globals, "TOPSTEP_ALLOWED_ACCOUNTS", [])
+                        tsx_ids = [str(x) for x in _allowed]
+                    for aid in tsx_ids:
+                        # Use standalone TopStepX fetcher so it is independent of MT5 and thread state
+                        try:
+                            norm = Functions.topstepx_get_open_normalized_simple(aid)
+                        except Exception:
+                            norm = []
+                        sys.stdout.write(f"\nTrades on TopStep Account {aid} : {len(norm)}\n")
+                        for p in norm:
+                            try:
+                                side = "BUY" if int(p.get("type", 0)) == 0 else "SELL"
+                            except Exception:
+                                side = str(p.get("type"))
+                            entry = p.get("entryPrice")
+                            vol = p.get("volume")
+                            tpv = p.get("tp")
+                            slv = p.get("sl")
+                            sys.stdout.write(f"  Type\n    {side}\n")
+                            sys.stdout.write(f"  Entry\n    {entry}\n")
+                            sys.stdout.write(f"  Volume\n    {vol}\n")
+                            sys.stdout.write(f"  TP\n    {tpv}\n")
+                            sys.stdout.write(f"  SL\n    {slv}\n")
                 except Exception:
                     pass
                 # Optional: print each open trade's entry, TP, and SL (diagnostic)
@@ -180,6 +251,7 @@ class MQL5XRequestHandler(BaseHTTPRequestHandler):
                     dbg_env = os.environ.get("MQL5X_PRINT_OPEN_DETAILS", "")
                     dbg_glob = getattr(Globals, "PRINT_OPEN_DETAILS", "")
                     if _truthy(dbg_env) or _truthy(dbg_glob):
+                        # MT5 client open details
                         opens = get_client_open(client_id)
                         for pos in opens:
                             sym = pos.get("symbol")
@@ -190,6 +262,29 @@ class MQL5XRequestHandler(BaseHTTPRequestHandler):
                             tpv = pos.get("tp")
                             slv = pos.get("sl")
                             sys.stdout.write(f"[{now_iso()}] OPEN {sym} ticket={tkt} entry={entry} TP={tpv} SL={slv}\n")
+                        # TopStepX open trades (full JSON per position) and explicit TP/SL lines
+                        try:
+                            tsx_ids = Functions.get_discovered_topstepx_accounts()
+                        except Exception:
+                            tsx_ids = []
+                        for aid in tsx_ids:
+                            try:
+                                t_opens = Functions.get_topstepx_open(aid)
+                            except Exception:
+                                t_opens = []
+                            if not t_opens:
+                                continue
+                            sys.stdout.write(f"[{now_iso()}] TSX OPEN account={aid} count={len(t_opens)}\n")
+                            for p in t_opens:
+                                try:
+                                    sys.stdout.write("  " + json.dumps(p, ensure_ascii=False) + "\n")
+                                    # Also print a compact TP/SL line using helper
+                                    cid = p.get("contractId") or p.get("contract")
+                                    if cid:
+                                        tpsl = Functions.get_topstepx_tp_sl(aid, cid)
+                                        sys.stdout.write(f"    TP/SL -> TP={tpsl.get('tp')} SL={tpsl.get('sl')}\n")
+                                except Exception:
+                                    sys.stdout.write(f"  {str(p)}\n")
                 except Exception:
                     pass
                 # If this is an open order command, also print a single summary line
@@ -226,6 +321,40 @@ class MQL5XRequestHandler(BaseHTTPRequestHandler):
                     "closed_online_count": len(get_client_closed_online(client_id)),
                 })
                 return
+
+        # TopStepX: dump all open trades for discovered accounts
+        if self.path.startswith("/topstepx/open"):
+            try:
+                # Force a fresh refresh to get latest TP/SL merged
+                Functions.refresh_topstepx_open_details(refresh_seconds=0)
+            except Exception:
+                pass
+            try:
+                ids = Functions.get_discovered_topstepx_accounts()
+            except Exception:
+                ids = []
+            result = {}
+            for aid in ids:
+                try:
+                    positions = Functions.get_topstepx_open(aid)
+                except Exception:
+                    positions = []
+                result[str(aid)] = positions
+                # Print to console for inspection
+                try:
+                    if positions:
+                        sys.stdout.write(f"[{now_iso()}] TSX OPEN account={aid} count={len(positions)}\n")
+                        for p in positions:
+                            try:
+                                sys.stdout.write("  " + json.dumps(p, ensure_ascii=False) + "\n")
+                            except Exception:
+                                sys.stdout.write(f"  {str(p)}\n")
+                    else:
+                        sys.stdout.write(f"[{now_iso()}] TSX OPEN account={aid} count=0\n")
+                except Exception:
+                    pass
+            self._send_json(200, {"accounts": result})
+            return
 
         # Not found
         self._send_json(404, {"status": "not_found"})
@@ -325,6 +454,13 @@ def main() -> None:
     # On startup, fetch and print TopStepX accounts and seed the discovered list
     try:
         Functions.print_find_all_accounts(only_active_accounts=False)
+    except Exception:
+        pass
+    # Start Mode 1 copier if configured
+    try:
+        import Globals as _G
+        if getattr(_G, "COPIER_MODE", 0) == 1:
+            Functions.start_mode_one_copier(interval_seconds=2)
     except Exception:
         pass
     server = HTTPServer((host, port), MQL5XRequestHandler)
